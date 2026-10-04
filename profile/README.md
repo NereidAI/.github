@@ -7,6 +7,8 @@ distribution, edge/cloud inference, and continuous feedback.
 NereidAI is delivered as a suite of focused products. Every product can be deployed standalone
 as a privatized deployment; together they form one unified platform.
 
+> All Nereid\* modules will be fully open-sourced by the end of 2026.
+
 ## Product Suite
 
 | Product | What it does |
