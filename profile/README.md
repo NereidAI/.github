@@ -11,7 +11,7 @@ as a privatized deployment; together they form one unified platform.
 
 | Product | What it does |
 |---|---|
-| **[NereidSphere](/NereidAI/NereidSphere)** | Thin suite layer — one portal, single sign-on, a unified API gateway, and the closed-loop event glue between products. It holds no domain logic of its own. |
+| **NereidSphere** | Thin suite layer — one portal, single sign-on, a unified API gateway, and the closed-loop event glue between products. It holds no domain logic of its own. |
 | **NereidLink** | Privatized IoT data pipeline — multi-protocol device access, unified messaging, rule engine, alerting, and real-time dashboards. One codebase, two forms: an all-in-one binary or Kubernetes microservices. |
 | **NereidForge** | Model factory — the full model lifecycle: dataset and annotation management, training and fine-tuning, optimization and quantization, hardware-targeted export, evaluation, and model registry. |
 | **NereidHorizon** | Edge distribution and deployment — distributes NereidEdge itself, plus applications and models, to large numbers of remote edge nodes: policy-driven rollout, bandwidth-aware delivery, OTA lifecycle, and autonomous reconciliation while offline. |
@@ -75,8 +75,8 @@ to bring your AI vision to life.
 ## Industry Solutions
 
 - **NereidFactory** — Smart manufacturing: factory operations and intelligent production.
-- **[NereidSentinel](/NereidAI/NereidSentinel)** — Guard with Insight, Shape the Future.
-- **[NereidMedical](/NereidAI/NereidMedical)** — Empower Healing with Intelligent Insights.
+- **NereidSentinel** — Guard with Insight, Shape the Future.
+- **NereidMedical** — Empower Healing with Intelligent Insights.
 
 ## Our Mission
 
