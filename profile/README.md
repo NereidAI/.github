@@ -61,6 +61,7 @@ NereidAI is built by open-source insiders, not outsiders replacing the open-sour
 | **NereidHorizon** | Edge distribution and deployment — distributes NereidEdge itself, plus applications and models, to large numbers of remote edge nodes: policy-driven rollout, bandwidth-aware delivery, OTA lifecycle, and autonomous reconciliation while offline. |
 | **NereidEdge** | Southbound edge integration, delivered and kept up to date by NereidHorizon — runs on field gateways, connects field devices into NereidLink with zero-touch onboarding, secure mTLS links, store-and-forward buffering, local autonomy, and OTA lifecycle over intermittent LAN/WAN links. |
 | **NereidFleet** | Robot fleet management — multi-robot task scheduling, traffic coordination, a live operations dashboard, and teleoperation, from wheeled AMRs to legged robots. |
+| **NereidMobile** | The operator's window into NereidLink — mobile app and WeChat Mini Program: sign in through NereidSphere SSO, browse your devices' live telemetry and dashboards, lightweight time-series chart analysis, and alert delivery to your phone. |
 
 ## How It Fits Together
 
@@ -76,10 +77,10 @@ NereidAI is built by open-source insiders, not outsiders replacing the open-sour
                   ┬───────────────────────────┼───────────────────────────────┬
                              Private platform · cloud / central DC
 ════════════════════════════════════════════════════════════════════════════════════════════════
-                              ┌──────────────────────────────┐
-                              │         NereidSphere         │
-                              │portal · SSO · gateway · glue │
-                              └───────────────┴──────────────┘
+                              ┌──────────────────────────────┐   ┌────────────────────────────┐
+                              │         NereidSphere         │◀──│        NereidMobile        │
+                              │portal · SSO · gateway · glue │   │ app · WeChat Mini Program  │
+                              └───────────────┴──────────────┘   └────────────────────────────┘
  ┊┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┿
  ┊          ┬─────────────────────────────────┼────────────────────────────────┬
  ┊┌────────────────────┐           ┌────────────────────┐           ┌────────────────────┐
@@ -106,11 +107,16 @@ NereidAI is built by open-source insiders, not outsiders replacing the open-sour
   ──▶ data / artifacts / telemetry · feedback loop                  │   field gateways   │
   ▼▲ real-time low-latency LAN link (commands / state)              └────────────────────┘
   ┈▶ SSO · portal · management plane over WAN
+  ◀ NereidMobile (app · WeChat Mini Program): telemetry · charts · alerts via NereidLink
   ▼ NereidEdge itself, apps and models distributed by NereidHorizon (OTA)
 ```
 
 Each product owns its domain end to end — its own UI, APIs, and release cycle. NereidSphere only
 provides a common entry point and federates identity; it never duplicates a product's features.
+
+NereidMobile is the thin client that lives outside the platform diagram: a mobile app and WeChat
+Mini Program that signs in through NereidSphere, reads device telemetry and dashboards from
+NereidLink, and delivers alerts — without running any domain logic of its own.
 
 ## Community vs Enterprise
 
