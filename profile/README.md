@@ -15,12 +15,14 @@ they form one unified platform.
   across NVIDIA, AMD, Intel, ARM, Ascend, SOPHGO, MetaX, Enflame, and Rockchip
 - **Production proven** — core components already operate in private production deployments
   (NDA references on request)
-- **Commercially supported** — community edition is open source; enterprise LTS, SLAs, hardening,
-  and turnkey private delivery are available
+- **Open source, commercially supported** — community support is free; enterprise LTS, SLAs,
+  hardening, customization, and turnkey private delivery are offered commercially
+  (see [License & Support](#license--support))
 
-> The community edition of the full edge-to-cloud loop is planned for open source by the end
-> of 2026. Individual modules will be released progressively; status will be tracked in this
-> organization and in Discussions. Enterprise capabilities are offered commercially
+> The community edition of the full edge-to-cloud loop will be open-sourced by the end of
+> 2026 under the terms stated in [License & Support](#license--support). Individual modules
+> will be released progressively; status will be tracked in this organization and in
+> Discussions. Enterprise capabilities are offered commercially
 > (see [Community vs Enterprise](#community-vs-enterprise)).
 
 ## Team & Open-Source Governance
@@ -131,14 +133,29 @@ large organizations.
 | NereidSphere multi-tenant suite control plane | — | Unified identity and cross-product governance — one login, one portal, consistent tenants and policies across the suite |
 | High availability, disaster recovery, large-scale rollout policy | — | Scale and resilience — fleet-wide rollouts with HA/DR for sites that cannot tolerate downtime |
 | Audit, hardening, compliance baselines (等保 etc.) | — | Compliance and audit readiness for regulated industries and SOE / multinational procurement |
-| Signed artifacts, SBOM, CVE SLA, backported fixes | community | Supply-chain security and a contractual response commitment |
+| Signed release artifacts and per-release SBOM | ✓ | Plus signed offline bundles and enterprise supply-chain workflows |
+| CVE response SLA and backported fixes | — | Contractual response commitment with fixes backported to LTS versions |
 | Air-gapped delivery, private POC, training | self-service | Turnkey delivery and knowledge transfer on the customer's premises |
-| Support | GitHub issues / Discussions | 7×24 LTS with a named engineer |
+| Support | GitHub issues / Discussions (community only, no SLA) | 7×24 LTS with a named engineer |
 
-Licensing of the community components will be confirmed as the modules are open-sourced
-through 2026.
+## License & Support
 
-## Industry Solutions
+NereidAI is fully open source under the
+[Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0). Community support is
+provided through GitHub issues and Discussions only — **we do not provide free technical
+support**. The following are available separately under commercial terms (see [Contact](#contact)):
+
+- Enterprise LTS with backported fixes and a contractual CVE response SLA
+- Turnkey air-gapped deployment and on-premises private POC
+- Custom development: device/connector integration, multi-vendor silicon/NPU acceleration,
+  and industry-specific adaptation
+- Private training and knowledge transfer
+
+## Commercial Industry Solutions
+
+The solutions below are **commercial offerings** built on top of the open NereidAI platform.
+They are licensed, delivered, and supported under separate commercial agreements and are not
+part of the community edition.
 
 - **NereidFactory** — Smart manufacturing: factory operations and intelligent production.
 - **NereidSentinel** — Guard with Insight, Shape the Future.
@@ -152,6 +169,7 @@ all in a single platform.
 
 ## Contact
 
-For enterprise inquiries, NDA references, or collaboration: please reach out through the
+For enterprise inquiries, commercial support / deployment / customization, NDA references,
+or collaboration: please reach out through the
 **[NereidAI organization on GitHub](https://github.com/NereidAI)** (organization owners /
 Discussions).
