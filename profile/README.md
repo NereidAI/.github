@@ -7,7 +7,9 @@ It closes the loop from edge data collection → multi-silicon model factory →
 edge distribution → inference and feedback — without mandatory cloud dependency.
 
 NereidAI ships as a suite of focused products; each can be deployed standalone, and together
-they form one unified platform.
+they form one unified platform. A thin suite layer ties them together without absorbing their
+domain logic: the **NereidSphere** portal and API gateway, and the **NereidIdentity** single
+sign-on and access-control center.
 
 - **Private by design** — fully offline / air-gapped delivery, no mandatory call-home; built for
   sovereign, regulated, and network-isolated environments
@@ -44,26 +46,34 @@ NereidAI is built by open-source insiders, not outsiders replacing the open-sour
 
 ## Deployment & Security Posture
 
+Security and operability are first-class concerns, not bolt-ons. The platform is designed to run
+with no internet access and to keep every byte inside the customer perimeter:
+
 | Capability | Status |
 |---|---|
 | Air-gapped / offline installation (full image bundles, no internet required) | Available |
 | No mandatory call-home; data stays inside the customer perimeter | Available |
 | mTLS service-to-service and device-to-platform links | Available |
+| Unified SSO and centralized RBAC across all suite products (NereidIdentity) | Available |
 | Signed release artifacts and per-release SBOM | Planned |
 | Enterprise SLA on CVE response and backported fixes | Commercial contract |
 | Compliance baselines (e.g. 等保 2.0) and local-OS / accelerator certifications | Per-engagement roadmap |
 
 ## Product Suite
 
+Two thin suite services tie the family together; six domain products do the work. Every domain
+product is a complete system that can run on its own — the suite services only federate them.
+
 | Product | What it does |
 |---|---|
-| **NereidSphere** | Thin suite layer — one portal, single sign-on, a unified API gateway, and the closed-loop event glue between products. It holds no domain logic of its own. |
+| **NereidSphere** | Thin suite layer — a single portal and a unified API gateway, plus the closed-loop event glue between products. It holds no domain logic of its own and delegates authentication to NereidIdentity. |
+| **NereidIdentity** | Suite authentication and identity center — single sign-on across every NereidAI product, OIDC / LDAP / SAML federation, role-based access control, token issuance, and tenant-aware access governance. |
 | **NereidLink** | Privatized IoT data pipeline — multi-protocol device access, unified messaging, rule engine, alerting, and real-time dashboards. One codebase, two forms: an all-in-one binary or Kubernetes microservices. |
 | **NereidForge** | Model factory — dataset/annotation management, training and fine-tuning, optimization and quantization, hardware-targeted export across the silicon vendors above, evaluation, and model registry. |
 | **NereidHorizon** | Edge distribution and deployment — distributes NereidEdge itself, plus applications and models, to large numbers of remote edge nodes: policy-driven rollout, bandwidth-aware delivery, OTA lifecycle, and autonomous reconciliation while offline. |
 | **NereidEdge** | Southbound edge integration, delivered and kept up to date by NereidHorizon — runs on field gateways, connects field devices into NereidLink with zero-touch onboarding, secure mTLS links, store-and-forward buffering, local autonomy, and OTA lifecycle over intermittent LAN/WAN links. |
 | **NereidFleet** | Robot fleet management — multi-robot task scheduling, traffic coordination, a live operations dashboard, and teleoperation, from wheeled AMRs to legged robots. |
-| **NereidMobile** | The operator's window into NereidLink — mobile app and WeChat Mini Program: sign in through NereidSphere SSO, browse your devices' live telemetry and dashboards, lightweight time-series chart analysis, and alert delivery to your phone. |
+| **NereidMobile** | The operator's window into NereidLink — mobile app and WeChat Mini Program: sign in through NereidIdentity, browse your devices' live telemetry and dashboards, lightweight time-series chart analysis, and alert delivery to your phone. |
 
 ## How It Fits Together
 
@@ -79,11 +89,11 @@ NereidAI is built by open-source insiders, not outsiders replacing the open-sour
                   ┬───────────────────────────┼───────────────────────────────┬
                              Private platform · cloud / central DC
 ════════════════════════════════════════════════════════════════════════════════════════════════
-                              ┌──────────────────────────────┐   ┌────────────────────────────┐
-                              │         NereidSphere         │◀──│        NereidMobile        │
-                              │portal · SSO · gateway · glue │   │ app · WeChat Mini Program  │
-                              └───────────────┴──────────────┘   └────────────────────────────┘
- ┊┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┿
+  ┌─────────────────────────┐    ┌─────────────────────────┐    ┌─────────────────────────┐
+  │      NereidIdentity     │◀──▶│       NereidSphere      │◀───│       NereidMobile      │
+  │    SSO · auth · RBAC    │    │ portal · gateway · glue │    │app · WeChat mini-program│
+  └────────────┴────────────┘    └────────────┴────────────┘    └─────────────────────────┘
+ ┊┈┈┈┈┈┈┈┈┈┈┈┈┈┿┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┿
  ┊          ┬─────────────────────────────────┼────────────────────────────────┬
  ┊┌────────────────────┐           ┌────────────────────┐           ┌────────────────────┐
  ┊│     NereidLink     │           │    NereidForge     │           │   NereidHorizon    │
@@ -113,12 +123,14 @@ NereidAI is built by open-source insiders, not outsiders replacing the open-sour
   ▼ NereidEdge itself, apps and models distributed by NereidHorizon (OTA)
 ```
 
-Each product owns its domain end to end — its own UI, APIs, and release cycle. NereidSphere only
-provides a common entry point and federates identity; it never duplicates a product's features.
+Each product owns its domain end to end — its own UI, APIs, and release cycle. The suite layer is
+deliberately thin: NereidSphere provides the common portal, API gateway, and cross-product event
+glue, while NereidIdentity owns authentication and access control. Neither duplicates a product's
+features, and both are optional for single-product deployments.
 
-NereidMobile is the thin client that lives outside the platform diagram: a mobile app and WeChat
-Mini Program that signs in through NereidSphere, reads device telemetry and dashboards from
-NereidLink, and delivers alerts — without running any domain logic of its own.
+NereidMobile is the thin client at the edge of the diagram: a mobile app and WeChat Mini Program
+that authenticates through NereidIdentity, reads device telemetry and dashboards from NereidLink,
+and delivers alerts — without running any domain logic of its own.
 
 ## Community vs Enterprise
 
@@ -130,7 +142,8 @@ large organizations.
 |---|---|---|
 | NereidEdge connectors & NPU adapter plugins | ✓ | Same capabilities, with vendor-backed integration support |
 | NereidLink / NereidForge / NereidHorizon, single-site | ✓ | Multi-site scale — federated operation across many sites, certified hardware/accelerator combinations, and vendor-supported rollout with LTS |
-| NereidSphere multi-tenant suite control plane | — | Unified identity and cross-product governance — one login, one portal, consistent tenants and policies across the suite |
+| NereidSphere + NereidIdentity multi-tenant control plane | — | Unified identity and cross-product governance — one login, one portal, consistent tenants and policies across the suite |
+| NereidIdentity external IdP federation (OIDC / LDAP / SAML) and SCIM provisioning | — | Enterprise IAM integration — connect to an existing directory and automate user lifecycle management |
 | High availability, disaster recovery, large-scale rollout policy | — | Scale and resilience — fleet-wide rollouts with HA/DR for sites that cannot tolerate downtime |
 | Audit, hardening, compliance baselines (等保 etc.) | — | Compliance and audit readiness for regulated industries and SOE / multinational procurement |
 | Signed release artifacts and per-release SBOM | ✓ | Plus signed offline bundles and enterprise supply-chain workflows |
