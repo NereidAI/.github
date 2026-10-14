@@ -3,8 +3,9 @@
 **NereidAI** is an end-to-end AIoT platform built for air-gapped and multi-vendor silicon
 environments.
 
-It closes the loop from edge data collection → multi-silicon model factory → large-scale offline
-edge distribution → inference and feedback — without mandatory cloud dependency.
+It closes the loop from edge data collection (**NereidEdge**) → multi-silicon model factory
+(**NereidForge**) → large-scale offline edge distribution (**NereidHorizon**) → inference and
+feedback (**NereidLink**) — without mandatory cloud dependency.
 
 NereidAI ships as a suite of focused products; each can be deployed standalone, and together
 they form one unified platform. A thin suite layer ties them together without absorbing their
