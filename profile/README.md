@@ -96,18 +96,18 @@ product is a complete system that can run on its own — the suite services only
  ┊┈┈┈┈┈┈┈┈┈┈┈┈┈┿┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┿
  ┊          ┬─────────────────────────────────┼────────────────────────────────┬
  ┊┌────────────────────┐           ┌────────────────────┐           ┌────────────────────┐
- ┊│     NereidLink     │           │    NereidForge     │           │   NereidHorizon    │
- ┊│   device access    │data ───▶  │   model factory    │artifacts  │ edge distribution  │
- ┊│   rules · alerts   │◀─ feedback│  train · optimize  │──────────▶│   policy rollout   │
- ┊│     dashboards     │           │  evaluate · store  │           │   delivery · OTA   │
+ ┊│    NereidForge     │           │   NereidHorizon    │           │     NereidLink     │
+ ┊│   model factory    │  models   │ edge distribution  │           │   device access    │
+ ┊│  train · optimize  │──────────▶│   policy rollout   │           │   rules · alerts   │
+ ┊│  evaluate · store  │           │   delivery · OTA   │           │     dashboards     │
  ┊│                    │           │                    │           │                    │
- ┊└─────────▲──────────┘           └────────────────────┘           └──────────▼─────────┘
- ┊          └──────────────────────────────────────────────────────────┐       │
-┈┊┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈  WAN · intermittent links  ┈┈┈┈┈┈┈┈┈┼┈┈┈┈┈┈┈┼┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈
- ┊        telemetry: secure mTLS · store-and-forward                   │       │
- ┊  SSO · portal · mgmt over WAN              distributes NereidEdge + apps / models (OTA)
- ┊                           Site / field · local LAN (low latency)    │       │
- ┊┌──────────────────┐ commands ┌────────────────┐                  ┌────────────────────┐
+ ┊└─────────▲──────────┘           └──────────▼─────────┘           └──────────▲─────────┘
+ ┊          └◀──── data ──────────────────────┼────────────────────────────────┤
+┈┊┈┈┈┈ WAN · intermittent links ┈┈┈┈┈┈┈┈┈┈┈┈┈┈┴┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┼┈┈┈┈┈┈┈┈┈┈
+ ┊        telemetry: secure mTLS · store-and-forward                           │
+ ┊SSO · portal · mgmt over WAN                distributes NereidEdge + apps / models (OTA)
+ ┊                          Site / field · local LAN (low latency)             │
+ ┊┌──────────────────┐ commands ┌────────────────┐                  ┌──────────┴─────────┐
  ┊│   NereidFleet    │─────────▶│     robots     │                  │     NereidEdge     │
  └│ task scheduling  ◀───────── │  AMR · legged  │                  │ zero-touch · mTLS  │
   │ traffic control  │   state  │                │                  │ store-and-forward  │
