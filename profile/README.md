@@ -89,7 +89,9 @@ product is a complete system that can run on its own — the suite services only
                   │      consume platform via portal · SSO · gateway          │
                   ┬───────────────────────────┼───────────────────────────────┬
                              Private platform · cloud / central DC
+                       Commercial · enterprise-grade · separately licensed
 ════════════════════════════════════════════════════════════════════════════════════════════════
+                           Open source · Apache-2.0 community edition
   ┌─────────────────────────┐    ┌─────────────────────────┐    ┌─────────────────────────┐
   │      NereidIdentity     │◀──▶│       NereidSphere      │◀───│       NereidMobile      │
   │    SSO · auth · RBAC    │    │ portal · gateway · glue │    │app · WeChat mini-program│
