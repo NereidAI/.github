@@ -122,24 +122,26 @@ product is a complete system that can run on its own — the suite services only
  ┊└──────────────────┘          └────────────────┘                  └──────────┬─────────┘
    real-time low-latency LAN control loop       models ↓ · events ↑            │
                                                                                │
- ┊                               ╭╌╌╌╌╌╌╌╌╌╌╌╌╌╌┬╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┬─┌──────────┬─────────┐
- ┊                               ┆     𝘌𝘥𝘨𝘦𝘟 𝘥𝘦𝘷𝘪𝘤𝘦 𝘴𝘦𝘳𝘷𝘪𝘤𝘦𝘴      ┆ │  NereidInference   │
- ┊                               ┆     𝘰𝘯𝘷𝘪𝘧 · 𝘮𝘲𝘵𝘵 · 𝘮𝘰𝘥𝘣𝘶𝘴      ┆ │ camera · KServe v2 │
- ┊                               ┆         𝘳𝘦𝘴𝘵 · 𝘰𝘱𝘤-𝘶𝘢          ┆ │ decode → EdgeX bus │
- ┊                               ╰╌╌╌╌╌╌╌╌╌╌╌╌╌╌┬╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╯ └──────────▲─────────┘
-                                      data ↑    │         frames ↑             │
-                                                │                              │
-                                 ╭╌╌╌╌╌╌╌╌╌╌╌╌╌╌┬╌╌╌╌╌╌╌╌╌╌╌╌╌╌╮    ╭╌╌╌╌╌╌╌╌╌╌┬╌╌╌╌╌╌╌╌╌╮
-                                 ┆     𝘗𝘓𝘊 · 𝘮𝘦𝘵𝘦𝘳𝘴 · 𝘙𝘍𝘐𝘋     ┆    ┆ 𝘴𝘦𝘯𝘴𝘰𝘳𝘴 · 𝘤𝘢𝘮𝘦𝘳𝘢𝘴  ┆
-                                 ┆        𝘧𝘪𝘦𝘭𝘥 𝘥𝘦𝘷𝘪𝘤𝘦𝘴        ┆    ┆   𝘧𝘪𝘦𝘭𝘥 𝘨𝘢𝘵𝘦𝘸𝘢𝘺𝘴   ┆
-                                 ╰╌╌╌╌╌╌╌╌╌╌╌╌╌╌┴╌╌╌╌╌╌╌╌╌╌╌╌╌╌╯    ╰╌╌╌╌╌╌╌╌╌╌┴╌╌╌╌╌╌╌╌╌╯
+                        ┌────────────────────────────────────────────────┬─────┘
+                        │                                                │
+ ┊       ╭╌╌╌╌╌╌╌╌╌╌╌╌╌╌┬╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╮                 ┌──────────────┬───────────────┐
+ ┊       ┆    EdgeX device services     ┆                 │       NereidInference        │
+ ┊       ┆    onvif · mqtt · modbus     ┆                 │      camera · KServe v2      │
+ ┊       ┆        rest · opc-ua         ┆                 │      decode → EdgeX bus      │
+ ┊       ╰╌╌╌╌╌╌╌╌╌╌╌╌╌╌┬╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╯                 └──────────────▲───────────────┘
+             data ↑     │                                     frames ↑   │
+                        │                                                │
+         ╭╌╌╌╌╌╌╌╌╌╌╌╌╌╌┬╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╮                 ╭╌╌╌╌╌╌╌╌╌╌╌╌╌╌┬╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╮
+         ┆     PLC · meters · RFID      ┆                 ┆      sensors · cameras       ┆
+         ┆        field devices         ┆                 ┆        field gateways        ┆
+         ╰╌╌╌╌╌╌╌╌╌╌╌╌╌╌┴╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╯                 ╰╌╌╌╌╌╌╌╌╌╌╌╌╌╌┴╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╯
   ──▶ data / artifacts / telemetry · feedback loop
   ▼▲ real-time low-latency LAN link (commands / state)
   ┈▶ SSO · portal · management plane over WAN
   ◀ NereidMobile (app · WeChat Mini Program): telemetry · charts · alerts via NereidLink
   ▼ NereidEdge itself, apps and models distributed by NereidHorizon (OTA)
   ◆ device-inference (NereidInference): frames → KServe v2/OpenAI → EdgeX events
-  ╭╌╌╮ dashed/italic = external to NereidAI: upstream EdgeX device services & physical devices
+  ╭╌╌╮ dashed box = external to NereidAI: upstream EdgeX device services & physical devices
 ```
 
 Each product owns its domain end to end — its own UI, APIs, and release cycle. The suite layer is
