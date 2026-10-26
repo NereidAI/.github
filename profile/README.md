@@ -4,8 +4,8 @@
 environments.
 
 It closes the loop from edge data collection (**NereidEdge**) → multi-silicon model factory
-(**NereidForge**) → large-scale offline edge distribution (**NereidHorizon**) → inference and
-feedback (**NereidLink**) — without mandatory cloud dependency.
+(**NereidForge**) → large-scale offline edge distribution (**NereidHorizon**) → edge inference
+(**NereidInference**) and feedback (**NereidLink**) — without mandatory cloud dependency.
 
 NereidAI ships as a suite of focused products; each can be deployed standalone, and together
 they form one unified platform. A thin suite layer ties them together without absorbing their
@@ -36,7 +36,9 @@ NereidAI is built by open-source insiders, not outsiders replacing the open-sour
   served on the [**Technical Steering Committee**](https://lf-edgexfoundry.atlassian.net/wiki/spaces/FA/pages/11667441/Technical+Steering+Committee+TSC)
   **since 2024**, contributing modules and features now running in production across numerous
   projects. NereidEdge is an enterprise-grade edge integration layer built *on top of* EdgeX,
-  tracking upstream rather than forking it.
+  tracking upstream rather than forking it; **NereidInference**, our descriptor-driven media
+  inference device service (camera frames → KServe gRPC v2 / OpenAI model server → decoded
+  EdgeX events), is being prepared for upstream contribution to EdgeX.
 - **Open Horizon** — we authored the **Open Horizon Web UI** contribution, to be released to
   the community in Q4 2026; NereidHorizon is our enhancement around it.
 - **Multi-vendor GPU/NPU expertise** — deep hands-on integration across NVIDIA, AMD, Intel,
@@ -62,7 +64,7 @@ with no internet access and to keep every byte inside the customer perimeter:
 
 ## Product Suite
 
-Two thin suite services tie the family together; six domain products do the work. Every domain
+Two thin suite services tie the family together; seven domain products do the work. Every domain
 product is a complete system that can run on its own — the suite services only federate them.
 
 | Product | What it does |
@@ -72,7 +74,8 @@ product is a complete system that can run on its own — the suite services only
 | **NereidLink** | Privatized IoT data pipeline — multi-protocol device access, unified messaging, rule engine, alerting, and real-time dashboards. One codebase, two forms: an all-in-one binary or Kubernetes microservices. |
 | **NereidForge** | Model factory — dataset/annotation management, training and fine-tuning, optimization and quantization, hardware-targeted export across the silicon vendors above, evaluation, and model registry. |
 | **NereidHorizon** | Edge distribution and deployment — distributes NereidEdge itself, plus applications and models, to large numbers of remote edge nodes: policy-driven rollout, bandwidth-aware delivery, OTA lifecycle, and autonomous reconciliation while offline. |
-| **NereidEdge** | Southbound edge integration, delivered and kept up to date by NereidHorizon — runs on field gateways, connects field devices into NereidLink with zero-touch onboarding, secure mTLS links, store-and-forward buffering, local autonomy, and OTA lifecycle over intermittent LAN/WAN links. |
+| **NereidEdge** | Southbound edge integration, delivered and kept up to date by NereidHorizon — runs on field gateways, connects devices into NereidLink with zero-touch onboarding, secure mTLS links, store-and-forward buffering, local autonomy, and OTA lifecycle over intermittent LAN/WAN links. |
+| **NereidInference** | Edge inference runtime — an EdgeX device service on field gateways: acquires frames from RTSP/ONVIF/JPEG sources, calls standards-based model servers (OpenVINO Model Server, Triton, vLLM, MindIE) over KServe gRPC v2 or OpenAI-compatible HTTP, decodes tensors via vendor-neutral model package descriptors, and publishes structured events to the EdgeX bus. Model packages built by NereidForge and delivered by NereidHorizon. |
 | **NereidFleet** | Robot fleet management — multi-robot task scheduling, traffic coordination, a live operations dashboard, and teleoperation, from wheeled AMRs to legged robots. |
 | **NereidMobile** | The operator's window into NereidLink — mobile app and WeChat Mini Program: sign in through NereidIdentity, browse your devices' live telemetry and dashboards, lightweight time-series chart analysis, and alert delivery to your phone. |
 
@@ -116,14 +119,23 @@ product is a complete system that can run on its own — the suite services only
   │ traffic control  │   state  │                │                  │ store-and-forward  │
   │dashboard · teleop│          │                │                  │   local autonomy   │
   └──────────────────┘          └────────────────┘                  └─────────▼──────────┘
-    real-time low-latency LAN control loop                                       cmds / data
-                                                                    ┌─────────▲──────────┐
+   real-time low-latency LAN control loop                 models ↓ · events ↑  │
+ ┊                                                                  ┌──────────┼─────────┐
+ ┊                                                                  │  NereidInference   │
+ ┊                                                                  │ camera · KServe v2 │
+ ┊                                                                  │ decode → EdgeX bus │
+ ┊                                                                  └──────────▲─────────┘
+                                                               frames ↑        │
+                                                                    ┌──────────▲─────────┐
                                                                     │ sensors · cameras  │
-  ──▶ data / artifacts / telemetry · feedback loop                  │   field gateways   │
-  ▼▲ real-time low-latency LAN link (commands / state)              └────────────────────┘
+                                                                    │   field gateways   │
+                                                                    └────────────────────┘
+  ──▶ data / artifacts / telemetry · feedback loop
+  ▼▲ real-time low-latency LAN link (commands / state)
   ┈▶ SSO · portal · management plane over WAN
   ◀ NereidMobile (app · WeChat Mini Program): telemetry · charts · alerts via NereidLink
   ▼ NereidEdge itself, apps and models distributed by NereidHorizon (OTA)
+  ◆ NereidInference on field gateways: frames → model server → decoded EdgeX events
 ```
 
 Each product owns its domain end to end — its own UI, APIs, and release cycle. The suite layer is
@@ -134,6 +146,13 @@ features, and both are optional for single-product deployments.
 NereidMobile is the thin client at the edge of the diagram: a mobile app and WeChat Mini Program
 that authenticates through NereidIdentity, reads device telemetry and dashboards from NereidLink,
 and delivers alerts — without running any domain logic of its own.
+
+NereidInference is the edge inference runtime: an EdgeX device service on each field gateway,
+it acquires camera frames (RTSP / ONVIF / JPEG), calls standards-based model servers
+(OpenVINO Model Server, Triton, vLLM, MindIE) over KServe gRPC v2 or OpenAI-compatible HTTP,
+decodes the raw tensors according to vendor-neutral model package descriptors, and publishes
+structured events back onto the EdgeX message bus. It contains no vendor SDK and no business
+logic — model packages are built by NereidForge and delivered by NereidHorizon.
 
 ## Community vs Enterprise
 
