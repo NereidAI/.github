@@ -64,7 +64,7 @@ with no internet access and to keep every byte inside the customer perimeter:
 
 ## Product Suite
 
-Two thin suite services tie the family together; seven domain products do the work. Every domain
+Two thin suite services tie the family together; eight domain products do the work. Every domain
 product is a complete system that can run on its own — the suite services only federate them.
 
 | Product | What it does |
@@ -77,6 +77,7 @@ product is a complete system that can run on its own — the suite services only
 | **NereidEdge** | Southbound edge integration, delivered and kept up to date by NereidHorizon — runs on field gateways, connects devices into NereidLink with zero-touch onboarding, secure mTLS links, store-and-forward buffering, local autonomy, and OTA lifecycle over intermittent LAN/WAN links. |
 | **NereidInference** | Edge inference runtime — an EdgeX device service on field gateways: acquires frames from RTSP/ONVIF/JPEG sources, calls standards-based model servers (OpenVINO Model Server, Triton, vLLM, MindIE) over KServe gRPC v2 or OpenAI-compatible HTTP, decodes tensors via vendor-neutral model package descriptors, and publishes structured events to the EdgeX bus. Model packages built by NereidForge and delivered by NereidHorizon. |
 | **NereidFleet** | Robot fleet management — multi-robot task scheduling, traffic coordination, a live operations dashboard, and teleoperation, from wheeled AMRs to legged robots. |
+| **NereidRobot** | *Planned — working name.* On-robot runtime for wheeled AMRs and legged robots — local autonomy on the vehicle and a built-in EdgeX device service that reports robot state and accepts dispatched tasks from NereidFleet over the low-latency LAN. |
 | **NereidMobile** | The operator's window into NereidLink — mobile app and WeChat Mini Program: sign in through NereidIdentity, browse your devices' live telemetry and dashboards, lightweight time-series chart analysis, and alert delivery to your phone. |
 
 ## How It Fits Together
@@ -114,28 +115,31 @@ product is a complete system that can run on its own — the suite services only
  ┊SSO · portal · mgmt over WAN                distributes NereidEdge + apps / models (OTA)
  ┊                          Site / field · local LAN (low latency)             │
  ┊┌──────────────────┐ commands ┌────────────────┐                  ┌──────────┴─────────┐
- ┊│   NereidFleet    │─────────▶│     robots     │                  │     NereidEdge     │
+ ┊│   NereidFleet    │─────────▶│  NereidRobot   │                  │     NereidEdge     │
  └│ task scheduling  ◀───────── │  AMR · legged  │                  │ zero-touch · mTLS  │
-  │ traffic control  │   state  │                │                  │ store-and-forward  │
-  │dashboard · teleop│          │                │                  │   local autonomy   │
-  └──────────────────┘          └────────────────┘                  └─────────▼──────────┘
-   real-time low-latency LAN control loop                 models ↓ · events ↑  │
- ┊                                                                  ┌──────────┼─────────┐
- ┊                                                                  │  NereidInference   │
- ┊                                                                  │ camera · KServe v2 │
- ┊                                                                  │ decode → EdgeX bus │
- ┊                                                                  └──────────▲─────────┘
-                                                               frames ↑        │
-                                                                    ┌──────────▲─────────┐
-                                                                    │ sensors · cameras  │
-                                                                    │   field gateways   │
-                                                                    └────────────────────┘
+ ┊│ traffic control  │    state │   + robot DS   │                  │ store-and-forward  │
+ ┊│dashboard · teleop│          │                │────── data ─────▶│   local autonomy   │
+ ┊└──────────────────┘          └────────────────┘                  └──────────┬─────────┘
+   real-time low-latency LAN control loop       models ↓ · events ↑            │
+                                                                               │
+ ┊                               ╭╌╌╌╌╌╌╌╌╌╌╌╌╌╌┬╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┬─┌──────────┬─────────┐
+ ┊                               ┆     𝘌𝘥𝘨𝘦𝘟 𝘥𝘦𝘷𝘪𝘤𝘦 𝘴𝘦𝘳𝘷𝘪𝘤𝘦𝘴      ┆ │  NereidInference   │
+ ┊                               ┆     𝘰𝘯𝘷𝘪𝘧 · 𝘮𝘲𝘵𝘵 · 𝘮𝘰𝘥𝘣𝘶𝘴      ┆ │ camera · KServe v2 │
+ ┊                               ┆         𝘳𝘦𝘴𝘵 · 𝘰𝘱𝘤-𝘶𝘢          ┆ │ decode → EdgeX bus │
+ ┊                               ╰╌╌╌╌╌╌╌╌╌╌╌╌╌╌┬╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╯ └──────────▲─────────┘
+                                      data ↑    │         frames ↑             │
+                                                │                              │
+                                 ╭╌╌╌╌╌╌╌╌╌╌╌╌╌╌┬╌╌╌╌╌╌╌╌╌╌╌╌╌╌╮    ╭╌╌╌╌╌╌╌╌╌╌┬╌╌╌╌╌╌╌╌╌╮
+                                 ┆     𝘗𝘓𝘊 · 𝘮𝘦𝘵𝘦𝘳𝘴 · 𝘙𝘍𝘐𝘋     ┆    ┆ 𝘴𝘦𝘯𝘴𝘰𝘳𝘴 · 𝘤𝘢𝘮𝘦𝘳𝘢𝘴  ┆
+                                 ┆        𝘧𝘪𝘦𝘭𝘥 𝘥𝘦𝘷𝘪𝘤𝘦𝘴        ┆    ┆   𝘧𝘪𝘦𝘭𝘥 𝘨𝘢𝘵𝘦𝘸𝘢𝘺𝘴   ┆
+                                 ╰╌╌╌╌╌╌╌╌╌╌╌╌╌╌┴╌╌╌╌╌╌╌╌╌╌╌╌╌╌╯    ╰╌╌╌╌╌╌╌╌╌╌┴╌╌╌╌╌╌╌╌╌╯
   ──▶ data / artifacts / telemetry · feedback loop
   ▼▲ real-time low-latency LAN link (commands / state)
   ┈▶ SSO · portal · management plane over WAN
   ◀ NereidMobile (app · WeChat Mini Program): telemetry · charts · alerts via NereidLink
   ▼ NereidEdge itself, apps and models distributed by NereidHorizon (OTA)
-  ◆ NereidInference on field gateways: frames → model server → decoded EdgeX events
+  ◆ device-inference (NereidInference): frames → KServe v2/OpenAI → EdgeX events
+  ╭╌╌╮ dashed/italic = external to NereidAI: upstream EdgeX device services & physical devices
 ```
 
 Each product owns its domain end to end — its own UI, APIs, and release cycle. The suite layer is
