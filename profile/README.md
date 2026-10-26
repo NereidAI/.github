@@ -125,7 +125,7 @@ product is a complete system that can run on its own — the suite services only
                         ┌────────────────────────────────────────────────┬─────┘
                         │                                                │
  ┊       ╭╌╌╌╌╌╌╌╌╌╌╌╌╌╌┬╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╮                 ┌──────────────┬───────────────┐
- ┊       ┆    EdgeX device services     ┆                 │       NereidInference        │
+ ┊       ┆ EdgeX Core + Device Services ┆                 │       NereidInference        │
  ┊       ┆    onvif · mqtt · modbus     ┆                 │      camera · KServe v2      │
  ┊       ┆        rest · opc-ua         ┆                 │      decode → EdgeX bus      │
  ┊       ╰╌╌╌╌╌╌╌╌╌╌╌╌╌╌┬╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╯                 └──────────────▲───────────────┘
@@ -141,7 +141,7 @@ product is a complete system that can run on its own — the suite services only
   ◀ NereidMobile (app · WeChat Mini Program): telemetry · charts · alerts via NereidLink
   ▼ NereidEdge itself, apps and models distributed by NereidHorizon (OTA)
   ◆ device-inference (NereidInference): frames → KServe v2/OpenAI → EdgeX events
-  ╭╌╌╮ dashed box = external to NereidAI: upstream EdgeX device services & physical devices
+  ╭╌╌╮ dashed box = external: upstream EdgeX core & device services, physical devices
 ```
 
 Each product owns its domain end to end — its own UI, APIs, and release cycle. The suite layer is
