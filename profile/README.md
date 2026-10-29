@@ -28,6 +28,25 @@ sign-on and access-control center.
 > Discussions. Enterprise capabilities are offered commercially
 > (see [Community vs Enterprise](#community-vs-enterprise)).
 
+## Start Here
+
+New to NereidAI? **NereidOverview** is the source-code entry point of this organization — whether
+you are deploying the platform for the first time or doing secondary development, start there. It
+contains no product runtime code; it gives you the workspace layout, the suite deployment
+runbooks, and pointers into every product's own documentation.
+
+| Your goal | Where NereidOverview sends you |
+|---|---|
+| Deploy the whole suite on k3s | Suite bootstrap and deployment runbooks |
+| Deploy to an air-gapped site | Delivery standards and offline mirror tooling |
+| Use a single product | That product's own repository and README — every product is independently deployable |
+| Contribute code, or work with a coding agent | The engineering treaty every NereidAI repository follows |
+
+You do not need the whole suite to use one product: clone just that product's repository and
+follow its README. NereidOverview and the product repositories are being opened progressively as
+part of the community-edition release described above; availability is tracked in this
+organization and in Discussions.
+
 ## Team & Open-Source Governance
 
 NereidAI is built by open-source insiders, not outsiders replacing the open-source edge stack:
@@ -39,8 +58,10 @@ NereidAI is built by open-source insiders, not outsiders replacing the open-sour
   tracking upstream rather than forking it; **NereidInference**, our descriptor-driven media
   inference device service (camera frames → KServe gRPC v2 / OpenAI model server → decoded
   EdgeX events), is being prepared for upstream contribution to EdgeX.
-- **Open Horizon** — we authored the **Open Horizon Web UI** contribution, to be released to
-  the community in Q4 2026; NereidHorizon is our enhancement around it.
+- **Open Horizon** — we authored the **Open Horizon Web UI**, now accepted into the upstream
+  Open Horizon community as
+  [**open-horizon/oh-web-ui-nereid**](https://github.com/open-horizon/oh-web-ui-nereid)
+  (Apache-2.0); NereidHorizon is our enhancement around it.
 - **Multi-vendor GPU/NPU expertise** — deep hands-on integration across NVIDIA, AMD, Intel,
   ARM, SOPHGO (算能), MetaX (登临), Enflame (灵汐), Rockchip (瑞芯微), and Ascend (华为昇腾),
   including early-silicon and vendor certification work.
@@ -66,9 +87,12 @@ with no internet access and to keep every byte inside the customer perimeter:
 
 Two thin suite services tie the family together; eight domain products do the work. Every domain
 product is a complete system that can run on its own — the suite services only federate them.
+**NereidOverview**, listed first, is not a service at all: it is the documentation-only entry
+point for newcomers and deployers (see [Start Here](#start-here)).
 
 | Product | What it does |
 |---|---|
+| **NereidOverview** | **Start here** — documentation-only entry point for the whole suite: workspace layout, k3s and air-gapped deployment runbooks, delivery standards, and pointers to each product's own docs. Contains no runtime code and nothing to deploy. |
 | **NereidSphere** | Thin suite layer — a single portal and a unified API gateway, plus the closed-loop event glue between products. It holds no domain logic of its own and delegates authentication to NereidIdentity. |
 | **NereidIdentity** | Suite authentication and identity center — single sign-on across every NereidAI product, OIDC / LDAP / SAML federation, role-based access control, token issuance, and tenant-aware access governance. |
 | **NereidLink** | Privatized IoT data pipeline — multi-protocol device access, unified messaging, rule engine, alerting, and real-time dashboards. One codebase, two forms: an all-in-one binary or Kubernetes microservices. |
