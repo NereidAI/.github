@@ -1,0 +1,179 @@
+# Copyright (C) 2026 YIQISOFT
+# SPDX-License-Identifier: Apache-2.0
+
+# Reusable suite-wide rolling-dev image workflow (root treaty §19).
+#
+# Companion to release-image.yml. Product repositories call this from a
+# branch-push workflow (main only; never a pull request, so forks cannot
+# publish). There is no VERSION file and no release tag on a branch build, so
+# the dev channel version is the fixed 0.0.0-dev:
+#   - 0.0.0-dev        floating tag moved to every new main HEAD
+#   - 0.0.0-dev-<sha>  immutable per-commit tag for traceability/rollback
+# A deliberate v* tag run goes through release-image.yml instead and produces
+# the bare-SemVer release tags (0.0.1, 0.0.1-<ts>, 0.0.1-<sha>).
+name: Reusable Suite Image Dev Publish
+
+on:
+  workflow_call:
+    inputs:
+      image-name:
+        description: GHCR package name under ghcr.io/nereidai (e.g. face-service)
+        type: string
+        required: true
+      platforms:
+        description: Multi-architecture platform list (treaty §19.2.1)
+        type: string
+        required: false
+        default: linux/amd64,linux/arm64
+      context:
+        description: Build context path
+        type: string
+        required: false
+        default: .
+      file:
+        description: Dockerfile path relative to the repository root
+        type: string
+        required: false
+        default: Dockerfile
+      target:
+        description: Optional multi-stage build target
+        type: string
+        required: false
+        default: ""
+      build-args:
+        description: Extra newline-separated Docker build arguments (no proxy/mirror endpoints, treaty §17). VERSION=0.0.0-dev is injected automatically.
+        type: string
+        required: false
+        default: ""
+      build-contexts:
+        description: Newline-separated named build contexts as name=path
+        type: string
+        required: false
+        default: ""
+      cache-scope:
+        description: Optional BuildKit gha cache scope; must match the branch CI warm job when used.
+        type: string
+        required: false
+        default: ""
+      vendor:
+        description: Value for the org.opencontainers.image.vendor manifest annotation.
+        type: string
+        required: false
+        default: "YIQISOFT"
+      licenses:
+        description: Value for the org.opencontainers.image.licenses manifest annotation (SPDX expression).
+        type: string
+        required: false
+        default: "Apache-2.0"
+      authors:
+        description: Value for the org.opencontainers.image.authors manifest annotation.
+        type: string
+        required: false
+        default: "NereidAI (https://github.com/NereidAI)"
+      description:
+        description: Value for the org.opencontainers.image.description annotation; empty omits it.
+        type: string
+        required: false
+        default: ""
+      annotations:
+        description: >-
+          Extra newline-separated OCI annotations (key=value, optional
+          index,manifest: level prefix) appended after the standard set.
+        type: string
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  packages: write
+
+# Never cancel a dev publish mid-push: the floating 0.0.0-dev tag could
+# otherwise be left pointing at the previous commit.
+concurrency:
+  group: publish-dev-${{ github.repository }}-${{ inputs.image-name }}
+  cancel-in-progress: false
+
+jobs:
+  publish-dev-image:
+    name: Build and publish ${{ inputs.image-name }} (dev)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Derive dev version
+        id: ver
+        run: |
+          echo "version=0.0.0-dev" >> "$GITHUB_OUTPUT"
+          echo "sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          echo "Dev channel: 0.0.0-dev and 0.0.0-dev-${GITHUB_SHA::7}"
+
+      - name: Assemble OCI annotations
+        id: ann
+        env:
+          IMAGE_NAME: ${{ inputs.image-name }}
+          IMAGE_VERSION: ${{ steps.ver.outputs.version }}
+          VENDOR: ${{ inputs.vendor }}
+          LICENSES: ${{ inputs.licenses }}
+          AUTHORS: ${{ inputs.authors }}
+          DESCRIPTION: ${{ inputs.description }}
+          EXTRA_ANNOTATIONS: ${{ inputs.annotations }}
+        run: |
+          created="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          repo_url="https://github.com/${GITHUB_REPOSITORY}"
+          {
+            echo "annotations<<ANNOT_EOF"
+            echo "index,manifest:org.opencontainers.image.source=${repo_url}"
+            echo "index,manifest:org.opencontainers.image.url=${repo_url}"
+            echo "index,manifest:org.opencontainers.image.documentation=${repo_url}#readme"
+            echo "index,manifest:org.opencontainers.image.title=${IMAGE_NAME}"
+            echo "index,manifest:org.opencontainers.image.version=${IMAGE_VERSION}"
+            echo "index,manifest:org.opencontainers.image.revision=${GITHUB_SHA}"
+            echo "index,manifest:org.opencontainers.image.created=${created}"
+            echo "index,manifest:org.opencontainers.image.vendor=${VENDOR}"
+            echo "index,manifest:org.opencontainers.image.licenses=${LICENSES}"
+            echo "index,manifest:org.opencontainers.image.authors=${AUTHORS}"
+            [ -n "$DESCRIPTION" ] && echo "index,manifest:org.opencontainers.image.description=${DESCRIPTION}"
+            [ -n "$EXTRA_ANNOTATIONS" ] && printf '%s\n' "$EXTRA_ANNOTATIONS"
+            echo "ANNOT_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU
+        if: inputs.platforms != 'linux/amd64'
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push multi-architecture dev image
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ inputs.context }}
+          file: ${{ inputs.file }}
+          platforms: ${{ inputs.platforms }}
+          target: ${{ inputs.target }}
+          build-args: |
+            VERSION=${{ steps.ver.outputs.version }}
+            ${{ inputs.build-args }}
+          build-contexts: ${{ inputs.build-contexts }}
+          annotations: ${{ steps.ann.outputs.annotations }}
+          push: true
+          provenance: false
+          sbom: false
+          cache-from: ${{ inputs.cache-scope != '' && format('type=gha,scope={0}', inputs.cache-scope) || 'type=gha' }}
+          cache-to: ${{ inputs.cache-scope != '' && format('type=gha,mode=max,scope={0}', inputs.cache-scope) || 'type=gha,mode=max' }}
+          # Floating tag last so GHCR shows 0.0.0-dev as the package's primary
+          # tag; both tags resolve to the same multi-architecture index digest.
+          tags: |
+            ghcr.io/nereidai/${{ inputs.image-name }}:${{ steps.ver.outputs.version }}-${{ steps.ver.outputs.sha }}
+            ghcr.io/nereidai/${{ inputs.image-name }}:${{ steps.ver.outputs.version }}
