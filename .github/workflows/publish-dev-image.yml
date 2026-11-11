@@ -55,6 +55,33 @@ on:
         type: string
         required: false
         default: ""
+      vendor:
+        description: Value for the org.opencontainers.image.vendor manifest annotation.
+        type: string
+        required: false
+        default: "YIQISOFT"
+      licenses:
+        description: Value for the org.opencontainers.image.licenses manifest annotation (SPDX expression).
+        type: string
+        required: false
+        default: "Apache-2.0"
+      authors:
+        description: Value for the org.opencontainers.image.authors manifest annotation.
+        type: string
+        required: false
+        default: "NereidAI (https://github.com/NereidAI)"
+      description:
+        description: Value for the org.opencontainers.image.description annotation; empty omits it.
+        type: string
+        required: false
+        default: ""
+      annotations:
+        description: >-
+          Extra newline-separated OCI annotations (key=value, optional
+          index,manifest: level prefix) appended after the standard set.
+        type: string
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -84,6 +111,36 @@ jobs:
           echo "sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
           echo "Dev channel: 0.0.0-dev and 0.0.0-dev-${GITHUB_SHA::7}"
 
+      - name: Assemble OCI annotations
+        id: ann
+        env:
+          IMAGE_NAME: ${{ inputs.image-name }}
+          IMAGE_VERSION: ${{ steps.ver.outputs.version }}
+          VENDOR: ${{ inputs.vendor }}
+          LICENSES: ${{ inputs.licenses }}
+          AUTHORS: ${{ inputs.authors }}
+          DESCRIPTION: ${{ inputs.description }}
+          EXTRA_ANNOTATIONS: ${{ inputs.annotations }}
+        run: |
+          created="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          repo_url="https://github.com/${GITHUB_REPOSITORY}"
+          {
+            echo "annotations<<ANNOT_EOF"
+            echo "index,manifest:org.opencontainers.image.source=${repo_url}"
+            echo "index,manifest:org.opencontainers.image.url=${repo_url}"
+            echo "index,manifest:org.opencontainers.image.documentation=${repo_url}#readme"
+            echo "index,manifest:org.opencontainers.image.title=${IMAGE_NAME}"
+            echo "index,manifest:org.opencontainers.image.version=${IMAGE_VERSION}"
+            echo "index,manifest:org.opencontainers.image.revision=${GITHUB_SHA}"
+            echo "index,manifest:org.opencontainers.image.created=${created}"
+            echo "index,manifest:org.opencontainers.image.vendor=${VENDOR}"
+            echo "index,manifest:org.opencontainers.image.licenses=${LICENSES}"
+            echo "index,manifest:org.opencontainers.image.authors=${AUTHORS}"
+            [ -n "$DESCRIPTION" ] && echo "index,manifest:org.opencontainers.image.description=${DESCRIPTION}"
+            [ -n "$EXTRA_ANNOTATIONS" ] && printf '%s\n' "$EXTRA_ANNOTATIONS"
+            echo "ANNOT_EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Set up QEMU
         if: inputs.platforms != 'linux/amd64'
         uses: docker/setup-qemu-action@v4
@@ -109,6 +166,7 @@ jobs:
             VERSION=${{ steps.ver.outputs.version }}
             ${{ inputs.build-args }}
           build-contexts: ${{ inputs.build-contexts }}
+          annotations: ${{ steps.ann.outputs.annotations }}
           push: true
           provenance: false
           sbom: false

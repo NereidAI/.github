@@ -61,6 +61,26 @@ workflow enforces, in one place:
 | `build-args` | no | empty | Extra newline-separated build args (never proxy/mirror endpoints); bare `VERSION` is injected automatically |
 | `build-contexts` | no | empty | Newline-separated named build contexts as `name=path` |
 | `cache-scope` | no | empty | BuildKit gha cache scope; multi-image repos pass one stable distinct scope per image, identical to their CI warm step. Empty renders the bare `type=gha` behavior |
+| `vendor` | no | `YIQISOFT` | `org.opencontainers.image.vendor` manifest annotation |
+| `licenses` | no | `Apache-2.0` | `org.opencontainers.image.licenses` manifest annotation (SPDX expression) |
+| `authors` | no | `NereidAI (https://github.com/NereidAI)` | `org.opencontainers.image.authors` manifest annotation |
+| `description` | no | empty | `org.opencontainers.image.description`; empty omits the annotation entirely |
+| `annotations` | no | empty | Extra newline-separated OCI annotations (`key=value`, optional `index,manifest:` level prefix) appended after the standard set |
+
+### OCI manifest annotations
+
+Every publication attaches the standard OCI 1.0 annotation set to **both the
+multi-architecture index and each per-platform manifest** (via buildx
+`--annotation`, not Dockerfile `LABEL` — the latter only lands in the image
+config, which the GHCR web UI does not render). The workflow derives
+`source`/`url`/`documentation` from `github.repository`, `title` from
+`image-name`, `version` from the derived SemVer (release) or fixed
+`0.0.0-dev` (dev channel), `revision` from the full commit SHA, and
+`created` from an RFC 3339 UTC timestamp generated in the run. Product
+repositories normally only pass `description`; the other four inputs exist
+for exceptions. Caller-provided Dockerfile `LABEL`s still populate the image
+config for traditional inspection tools (`docker inspect`, Syft, Trivy), so
+the two layers are intentionally complementary.
 
 The workflow itself runs with `contents: read` + `packages: write`. It never
 creates a GitHub Release: callers that want one add a second job with a
