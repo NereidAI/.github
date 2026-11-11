@@ -1,0 +1,156 @@
+# Copyright (C) 2026 YIQISOFT
+# SPDX-License-Identifier: Apache-2.0
+
+# Reusable suite-wide image release workflow (root treaty §19).
+#
+# Version model:
+# - Product repositories carry no VERSION file. The git tag is the single
+#   source of truth. It keeps the Go-style leading "v" (v0.0.1); every artifact
+#   coordinate uses bare SemVer with that prefix stripped (VERSION=0.0.1).
+# - A pushed tag matching v* and the SemVer shape is the only trigger. This
+#   workflow validates that shape (there is no file to diff against) and
+#   derives VERSION itself.
+# - It builds a linux/amd64 + linux/arm64 index with docker/build-push-action
+#   and publishes exactly three bare-SemVer tags — VERSION,
+#   VERSION-<utc-timestamp> and VERSION-<git-short-sha> — never "latest".
+# Product repositories keep only a thin caller that pins this workflow at a
+# semver tag (e.g. @v1). The rolling dev channel (0.0.0-dev on every main
+# push) lives in publish-dev-image.yml.
+name: Reusable Suite Image Release
+
+on:
+  workflow_call:
+    inputs:
+      image-name:
+        description: GHCR package name under ghcr.io/nereidai (e.g. nereidlink)
+        type: string
+        required: true
+      platforms:
+        description: Multi-architecture platform list (treaty §19.2.1)
+        type: string
+        required: false
+        default: linux/amd64,linux/arm64
+      context:
+        description: Build context path
+        type: string
+        required: false
+        default: .
+      file:
+        description: Dockerfile path relative to the repository root
+        type: string
+        required: false
+        default: Dockerfile
+      target:
+        description: Optional multi-stage build target
+        type: string
+        required: false
+        default: ""
+      build-args:
+        description: Extra newline-separated Docker build arguments (no proxy/mirror endpoints, treaty §17). Bare VERSION is injected automatically and need not appear here.
+        type: string
+        required: false
+        default: ""
+      build-contexts:
+        description: Newline-separated named build contexts as name=path
+        type: string
+        required: false
+        default: ""
+      cache-scope:
+        description: >-
+          Optional BuildKit gha cache scope name. When set, cache-from/cache-to
+          use type=gha,scope=<value>; the caller's branch CI warm job must use
+          the identical scope. Empty (default) keeps the bare type=gha
+          coordinates, so single-image callers are unaffected. Repositories
+          publishing more than one image MUST give every image its own stable
+          scope.
+        type: string
+        required: false
+        default: ""
+
+# Least privilege: publication only needs packages: write. A GitHub Release
+# entry is intentionally NOT created here — callers that want one add a
+# separate job with contents: write, so the other callers keep read-only
+# contents (GitHub intersects caller/callee token permissions).
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: release-image-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release-image:
+    name: Build and publish ${{ inputs.image-name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          # Full history lets local git describe work for any build-time query.
+          fetch-depth: 0
+
+      - name: Validate tag and derive bare SemVer VERSION
+        id: ver
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          # Go-style tag (v0.0.1) with an optional SemVer pre-release suffix.
+          if ! printf '%s' "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::Tag '$tag' is not a v-prefixed SemVer release tag (expected form v0.0.1)"
+            exit 1
+          fi
+          version="${tag#v}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Derived bare VERSION=$version from tag $tag"
+
+      - name: Derive traceability tags
+        id: stamp
+        run: |
+          echo "ts=$(date -u +%Y%m%d-%H%M)" >> "$GITHUB_OUTPUT"
+          echo "sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU
+        # Single-arch vendor images (treaty §19.2.1 exception) need no emulation.
+        if: inputs.platforms != 'linux/amd64'
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push multi-architecture image
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ inputs.context }}
+          file: ${{ inputs.file }}
+          platforms: ${{ inputs.platforms }}
+          target: ${{ inputs.target }}
+          # Bare VERSION is always injected (an unused ARG is ignored by
+          # BuildKit); callers may add further arguments below it.
+          build-args: |
+            VERSION=${{ steps.ver.outputs.version }}
+            ${{ inputs.build-args }}
+          build-contexts: ${{ inputs.build-contexts }}
+          push: true
+          provenance: false
+          sbom: false
+          # GHA layer cache shared with the branch CI warm/dev jobs; a cold
+          # cache transparently falls back to a full build.
+          cache-from: ${{ inputs.cache-scope != '' && format('type=gha,scope={0}', inputs.cache-scope) || 'type=gha' }}
+          cache-to: ${{ inputs.cache-scope != '' && format('type=gha,mode=max,scope={0}', inputs.cache-scope) || 'type=gha,mode=max' }}
+          # Order matters for the GHCR UI: tags are displayed newest-first and
+          # buildx assigns them in input order, so the bare VERSION tag goes
+          # last to appear as the package's primary tag. All three resolve to
+          # the same multi-architecture index digest.
+          tags: |
+            ghcr.io/nereidai/${{ inputs.image-name }}:${{ steps.ver.outputs.version }}-${{ steps.stamp.outputs.sha }}
+            ghcr.io/nereidai/${{ inputs.image-name }}:${{ steps.ver.outputs.version }}-${{ steps.stamp.outputs.ts }}
+            ghcr.io/nereidai/${{ inputs.image-name }}:${{ steps.ver.outputs.version }}
