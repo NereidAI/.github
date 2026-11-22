@@ -1,0 +1,309 @@
+# Copyright (C) 2026 YIQISOFT
+# SPDX-License-Identifier: Apache-2.0
+
+# Publish one product-owned Helm chart to GHCR OCI. The product repository
+# remains the chart's only source of truth; this workflow derives every version
+# from the caller's protected tag or main-branch commit and never mutates the
+# tracked Chart.yaml. Development publications include both the rolling
+# 0.0.0-dev channel and an immutable commit-qualified chart whose appVersion
+# selects the matching commit-qualified product images.
+name: Reusable Suite Chart Publication
+
+on:
+  workflow_call:
+    inputs:
+      chart-path:
+        description: Repository-relative path to the product-owned Helm chart.
+        type: string
+        required: true
+      chart-name:
+        description: Expected Chart.yaml name and final OCI repository name.
+        type: string
+        required: true
+      channel:
+        description: Publication channel; either release (a protected v* tag) or development (a main-branch commit).
+        type: string
+        required: true
+      version-mode:
+        description: product injects channel version/appVersion; upstream preserves the wrapper Chart.yaml metadata and is release-only.
+        type: string
+        required: false
+        default: product
+      values-files:
+        description: Optional newline-separated repository-relative values files used for Helm lint and render verification.
+        type: string
+        required: false
+        default: ""
+      set-values:
+        description: Optional newline-separated key=value placeholders used for Helm lint and render verification; never use real secrets.
+        type: string
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: publish-chart-${{ github.repository }}-${{ inputs.chart-name }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish-chart:
+    name: Publish ${{ inputs.chart-name }} (${{ inputs.channel }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v5
+        with:
+          version: v3.18.3
+
+      - name: Validate source and derive versions
+        id: versions
+        env:
+          CHANNEL: ${{ inputs.channel }}
+          CHART_PATH: ${{ inputs.chart-path }}
+          EXPECTED_CHART_NAME: ${{ inputs.chart-name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          VERSION_MODE: ${{ inputs.version-mode }}
+        run: |
+          set -euo pipefail
+          test -f "${CHART_PATH}/Chart.yaml"
+          metadata="$(helm show chart "${CHART_PATH}")"
+          chart_name="$(awk '/^name:/ {print $2; exit}' <<< "${metadata}")"
+          if [[ "${chart_name}" != "${EXPECTED_CHART_NAME}" ]]; then
+            echo "::error::Chart.yaml name '${chart_name}' does not match '${EXPECTED_CHART_NAME}'"
+            exit 1
+          fi
+          if [[ "${VERSION_MODE}" != "product" && "${VERSION_MODE}" != "upstream" ]]; then
+            echo "::error::Unknown version-mode '${VERSION_MODE}'; expected product or upstream"
+            exit 1
+          fi
+
+          case "${CHANNEL}" in
+            release)
+              if [[ "${GITHUB_REF_TYPE}" != "tag" ]]; then
+                echo "::error::Release chart publication requires a tag trigger"
+                exit 1
+              fi
+              if ! [[ "${GITHUB_REF_NAME}" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]; then
+                echo "::error::Tag '${GITHUB_REF_NAME}' is not v-prefixed SemVer without build metadata"
+                exit 1
+              fi
+              if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
+                IFS='.' read -ra prerelease_identifiers <<< "${GITHUB_REF_NAME#*-}"
+                for identifier in "${prerelease_identifiers[@]}"; do
+                  if [[ "${identifier}" =~ ^[0-9]+$ && "${#identifier}" -gt 1 && "${identifier}" == 0* ]]; then
+                    echo "::error::Numeric SemVer pre-release identifiers must not contain leading zeroes"
+                    exit 1
+                  fi
+                done
+              fi
+              versions=("${GITHUB_REF_NAME#v}")
+              ;;
+            development)
+              if [[ "${VERSION_MODE}" != "product" ]]; then
+                echo "::error::Development publication requires version-mode=product so chart and image tags share the commit"
+                exit 1
+              fi
+              if [[ "${GITHUB_REF_TYPE}" != "branch" || "${GITHUB_REF_NAME}" != "${DEFAULT_BRANCH}" ]]; then
+                echo "::error::Development chart publication requires the repository default branch"
+                exit 1
+              fi
+              versions=("0.0.0-dev-${GITHUB_SHA::7}" "0.0.0-dev")
+              ;;
+            *)
+              echo "::error::Unknown channel '${CHANNEL}'; expected release or development"
+              exit 1
+              ;;
+          esac
+
+          app_versions=("${versions[@]}")
+          if [[ "${VERSION_MODE}" == "upstream" ]]; then
+            chart_version="$(awk '/^version:/ {print $2; exit}' <<< "${metadata}")"
+            chart_app_version="$(awk '/^appVersion:/ {print $2; exit}' <<< "${metadata}" | tr -d '\"')"
+            test -n "${chart_version}"
+            test -n "${chart_app_version}"
+            versions=("${chart_version}")
+            app_versions=("${chart_app_version}")
+          fi
+          printf 'versions=%s\n' "$(printf '%s,' "${versions[@]}" | sed 's/,$//')" >> "${GITHUB_OUTPUT}"
+          printf 'app-versions=%s\n' "$(printf '%s,' "${app_versions[@]}" | sed 's/,$//')" >> "${GITHUB_OUTPUT}"
+
+      - name: Build locked chart dependencies
+        env:
+          CHART_PATH: ${{ inputs.chart-path }}
+        run: |
+          set -euo pipefail
+          metadata="$(helm show chart "${CHART_PATH}")"
+          if grep -q '^dependencies:' <<< "${metadata}"; then
+            index=0
+            while IFS= read -r repository; do
+              [[ -n "${repository}" ]] || continue
+              case "${repository}" in
+                https://*)
+                  helm repo add "nf-publication-${index}" "${repository}" --force-update
+                  index=$((index + 1))
+                  ;;
+                http://*)
+                  echo "::error::Plaintext Helm repositories are not allowed: ${repository}"
+                  exit 1
+                  ;;
+              esac
+            done < <(awk '/^  *repository:/ {print $2}' <<< "${metadata}" | tr -d '\"')
+            helm dependency build "${CHART_PATH}"
+          fi
+
+      - name: Lint and render chart
+        env:
+          CHART_PATH: ${{ inputs.chart-path }}
+          VALUES_FILES: ${{ inputs.values-files }}
+          SET_VALUES: ${{ inputs.set-values }}
+        run: |
+          set -euo pipefail
+          values_args=()
+          while IFS= read -r values_file; do
+            if [[ -n "${values_file}" ]]; then
+              test -f "${values_file}"
+              values_args+=(--values "${values_file}")
+            fi
+          done <<< "${VALUES_FILES}"
+          while IFS= read -r assignment; do
+            [[ -z "${assignment}" ]] || values_args+=(--set "${assignment}")
+          done <<< "${SET_VALUES}"
+          helm lint "${CHART_PATH}" "${values_args[@]}"
+          helm template "${{ inputs.chart-name }}" "${CHART_PATH}" "${values_args[@]}" >/dev/null
+
+      - name: Log in to GHCR with Helm
+        env:
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "${GHCR_TOKEN}" | helm registry login ghcr.io --username "${GHCR_USERNAME}" --password-stdin
+
+      - name: Install YAML parser for rendered-image verification
+        run: python3 -m pip install --disable-pip-version-check --quiet PyYAML==6.0.2
+
+      - name: Package, publish, and pull-verify charts
+        env:
+          CHART_PATH: ${{ inputs.chart-path }}
+          CHART_NAME: ${{ inputs.chart-name }}
+          VERSIONS: ${{ steps.versions.outputs.versions }}
+          APP_VERSIONS: ${{ steps.versions.outputs.app-versions }}
+          VERSION_MODE: ${{ inputs.version-mode }}
+          VALUES_FILES: ${{ inputs.values-files }}
+          SET_VALUES: ${{ inputs.set-values }}
+        run: |
+          set -euo pipefail
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          repository="oci://ghcr.io/${owner}/charts"
+          package_dir="${RUNNER_TEMP}/charts"
+          verify_dir="${RUNNER_TEMP}/chart-pull"
+          mkdir -p "${package_dir}" "${verify_dir}"
+          values_args=()
+          while IFS= read -r values_file; do
+            [[ -z "${values_file}" ]] || values_args+=(--values "${values_file}")
+          done <<< "${VALUES_FILES}"
+          while IFS= read -r assignment; do
+            [[ -z "${assignment}" ]] || values_args+=(--set "${assignment}")
+          done <<< "${SET_VALUES}"
+
+          IFS=',' read -ra versions <<< "${VERSIONS}"
+          IFS=',' read -ra app_versions <<< "${APP_VERSIONS}"
+          test "${#versions[@]}" -eq "${#app_versions[@]}"
+          for index in "${!versions[@]}"; do
+            version="${versions[$index]}"
+            app_version="${app_versions[$index]}"
+            package_args=("${CHART_PATH}" --destination "${package_dir}")
+            if [[ "${VERSION_MODE}" == "product" ]]; then
+              package_args+=(--version "${version}" --app-version "${app_version}")
+            fi
+            helm package "${package_args[@]}"
+            package="${package_dir}/${CHART_NAME}-${version}.tgz"
+            test -f "${package}"
+            metadata="$(helm show chart "${package}")"
+            actual_version="$(awk '/^version:/ {print $2; exit}' <<< "${metadata}")"
+            actual_app_version="$(awk '/^appVersion:/ {print $2; exit}' <<< "${metadata}" | tr -d '\"')"
+            test "${actual_version}" = "${version}"
+            test "${actual_app_version}" = "${app_version}"
+            rendered="${RUNNER_TEMP}/${CHART_NAME}-${version}.yaml"
+            helm template "${CHART_NAME}" "${package}" "${values_args[@]}" >"${rendered}"
+            python3 - "${rendered}" "${app_version}" <<'PY'
+          import pathlib
+          import re
+          import sys
+
+          import yaml
+
+          rendered = pathlib.Path(sys.argv[1])
+          app_version = sys.argv[2]
+          text = rendered.read_text()
+          reference_pattern = re.compile(
+              r"ghcr\.io/nereidai/[A-Za-z0-9][A-Za-z0-9._/-]*:[A-Za-z0-9_][A-Za-z0-9._-]*"
+          )
+          references = set(reference_pattern.findall(text))
+
+          def scalar(value):
+              if isinstance(value, str):
+                  return value
+              if isinstance(value, (int, float)) and not isinstance(value, bool):
+                  return str(value)
+              return None
+
+          def walk(node):
+              if isinstance(node, dict):
+                  tag = scalar(node.get("tag"))
+                  registry = scalar(node.get("registry"))
+                  if tag:
+                      for key in ("repository", "image"):
+                          repository = scalar(node.get(key))
+                          if not repository:
+                              continue
+                          if repository.startswith("ghcr.io/nereidai/"):
+                              full_repository = repository
+                          elif registry:
+                              full_repository = registry.rstrip("/") + "/" + repository.lstrip("/")
+                          else:
+                              continue
+                          if full_repository.startswith("ghcr.io/nereidai/"):
+                              references.add(full_repository + ":" + tag)
+                  for value in node.values():
+                      walk(value)
+              elif isinstance(node, list):
+                  for value in node:
+                      walk(value)
+              elif isinstance(node, str) and "\n" in node and "ghcr.io/nereidai/" in node:
+                  # ConfigMaps can embed another YAML document as a block scalar.
+                  try:
+                      nested = yaml.safe_load(node)
+                  except yaml.YAMLError:
+                      return
+                  if nested != node:
+                      walk(nested)
+
+          for document in yaml.safe_load_all(text):
+              walk(document)
+
+          mismatches = sorted(
+              reference
+              for reference in references
+              if not reference.endswith(":" + app_version)
+          )
+          if mismatches:
+              raise SystemExit(
+                  "suite images do not match chart appVersion " + app_version + ": " + ", ".join(mismatches)
+              )
+          PY
+            helm push "${package}" "${repository}"
+            helm pull "${repository}/${CHART_NAME}" \
+              --version "${version}" \
+              --destination "${verify_dir}"
+            cmp "${package}" "${verify_dir}/${CHART_NAME}-${version}.tgz"
+            printf 'Published and byte-verified %s/%s:%s\n' \
+              "${repository}" "${CHART_NAME}" "${version}" >> "${GITHUB_STEP_SUMMARY}"
+          done

@@ -9,7 +9,7 @@
 #   coordinate uses bare SemVer with that prefix stripped (VERSION=0.0.1).
 # - A pushed tag matching v* and the SemVer shape is the only trigger. This
 #   workflow validates that shape (there is no file to diff against) and
-#   derives VERSION itself.
+#   derives VERSION itself. Build metadata is excluded from Docker/OCI tags.
 # - It builds a linux/amd64 + linux/arm64 index with docker/build-push-action
 #   and publishes exactly three bare-SemVer tags — VERSION,
 #   VERSION-<utc-timestamp> and VERSION-<git-short-sha> — never "latest".
@@ -123,9 +123,19 @@ jobs:
         run: |
           tag="${GITHUB_REF_NAME}"
           # Go-style tag (v0.0.1) with an optional SemVer pre-release suffix.
-          if ! printf '%s' "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
-            echo "::error::Tag '$tag' is not a v-prefixed SemVer release tag (expected form v0.0.1)"
+          # Build metadata is intentionally excluded from OCI/Docker coordinates.
+          if ! [[ "$tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]; then
+            echo "::error::Tag '$tag' is not v-prefixed SemVer without build metadata (expected form v0.0.1)"
             exit 1
+          fi
+          if [[ "$tag" == *-* ]]; then
+            IFS='.' read -ra prerelease_identifiers <<< "${tag#*-}"
+            for identifier in "${prerelease_identifiers[@]}"; do
+              if [[ "$identifier" =~ ^[0-9]+$ && "${#identifier}" -gt 1 && "$identifier" == 0* ]]; then
+                echo "::error::Numeric SemVer pre-release identifiers must not contain leading zeroes"
+                exit 1
+              fi
+            done
           fi
           version="${tag#v}"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"

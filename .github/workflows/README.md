@@ -9,8 +9,85 @@ and implement root treaty §19 (Image Build, Publication and Tagging).
 There is no `VERSION` file in product repositories. The git tag is the single
 source of truth: it keeps the Go-style leading `v` (`v0.0.1`), while every
 artifact coordinate uses bare SemVer with that prefix stripped
-(`VERSION=0.0.1`). Branch builds that have no release tag use the fixed
-rolling-dev version `0.0.0-dev`.
+(`VERSION=0.0.1`). SemVer build metadata is deliberately unsupported because
+these coordinates must also be valid Docker/OCI tags. Branch builds that have
+no release tag use the fixed rolling-dev version `0.0.0-dev`.
+
+## publish-chart.yml
+
+Publishes one product-owned Helm chart to GHCR OCI without copying its source
+into another repository. Product release and rolling-development workflows call
+the same implementation so dependency resolution, validation, packaging and
+publication cannot drift.
+
+The chart source stays at the caller's `chart-path`. `chart-name` is checked
+against `Chart.yaml`, and the resulting package is published under
+`oci://ghcr.io/nereidai/charts/<chart-name>`. When dependencies are declared,
+the workflow registers their declared public HTTPS repositories (rather than
+relying on runner-local Helm configuration) and runs locked
+`helm dependency build`, then `helm lint` and `helm template`. Optional newline-separated `values-files` and `set-values`
+supply the committed or render-only placeholders required by charts whose
+defaults intentionally fail closed. Real site secrets never belong in either
+input. The packaged archive is rendered again before publication, including a
+check that every rendered GHCR suite-owned image reference—including references
+embedded in application configuration—equals the package's `appVersion`.
+
+The `channel` and `version-mode` inputs select the version model:
+
+- `release` with the default `version-mode: product`: the caller must be running
+  for a protected `v*` tag. The workflow validates the tag and publishes one
+  bare-SemVer chart, with `version` and `appVersion` set to that version.
+- `release` with `version-mode: upstream`: the workflow preserves both fields
+  from the wrapper's `Chart.yaml`. This is for versioned third-party wrappers
+  whose application version is independent of the suite release.
+- `development`: the caller must be running for the repository's default branch
+  and use `version-mode: product`. The workflow publishes
+  `0.0.0-dev-<short-sha>` first and the rolling `0.0.0-dev` second. Each
+  package's `appVersion` equals its chart version, so charts that default
+  suite-owned image tags to `.Chart.AppVersion` select the matching
+  commit-qualified images for immutable development installations.
+
+Product chart sources keep the `0.0.0-dev` placeholder; callers never pass a
+release version and no `VERSION` file is introduced. Upstream wrappers instead
+keep their own pinned chart/application versions. Authentication uses
+`helm registry login` (Docker's credential file is not Helm's registry
+configuration). Every push is followed by an authenticated `helm pull` and a
+byte-for-byte comparison with the pushed archive. After the first publication, set the
+new GHCR package's visibility to Public and verify an anonymous pull before
+referencing it from public installation documentation.
+
+### Inputs
+
+| Input | Required | Purpose |
+|---|---|---|
+| `chart-path` | yes | Repository-relative path to one chart directory |
+| `chart-name` | yes | Expected chart name and OCI repository name |
+| `channel` | yes | `release` or `development` |
+| `version-mode` | no | `product` (default) injects channel versions; `upstream` preserves wrapper metadata and is release-only |
+| `values-files` | no | Newline-separated committed placeholder values files for lint/render checks |
+| `set-values` | no | Newline-separated render-only `key=value` placeholders; never real secrets |
+
+### Caller examples
+
+```yaml
+release-chart:
+  uses: NereidAI/.github/.github/workflows/publish-chart.yml@v1
+  with:
+    chart-path: deploy/helm/nereididentity
+    chart-name: nereididentity
+    channel: release
+    values-files: deploy/helm/nereididentity/values-k3s-example.yaml
+```
+
+```yaml
+publish-dev-chart:
+  uses: NereidAI/.github/.github/workflows/publish-chart.yml@v1
+  with:
+    chart-path: deploy/helm/nereididentity
+    chart-name: nereididentity
+    channel: development
+    values-files: deploy/helm/nereididentity/values-k3s-example.yaml
+```
 
 ## release-image.yml
 
