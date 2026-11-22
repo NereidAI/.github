@@ -4,9 +4,10 @@
 # Publish one product-owned Helm chart to GHCR OCI. The product repository
 # remains the chart's only source of truth; this workflow derives every version
 # from the caller's protected tag or main-branch commit and never mutates the
-# tracked Chart.yaml. Development publications include both the rolling
-# 0.0.0-dev channel and an immutable commit-qualified chart whose appVersion
-# selects the matching commit-qualified product images.
+# tracked Chart.yaml. Development publications package one immutable
+# commit-qualified chart whose appVersion selects the matching commit-qualified
+# product images. The rolling 0.0.0-dev OCI tag is then attached to that exact
+# manifest, never to a separately packaged chart.
 name: Reusable Suite Chart Publication
 
 on:
@@ -64,6 +65,12 @@ jobs:
         with:
           version: v3.18.3
 
+      - name: Set up ORAS for exact OCI tag aliasing
+        if: inputs.channel == 'development'
+        uses: oras-project/setup-oras@v2
+        with:
+          version: 1.4.0
+
       - name: Validate source and derive versions
         id: versions
         env:
@@ -116,7 +123,7 @@ jobs:
                 echo "::error::Development chart publication requires the repository default branch"
                 exit 1
               fi
-              versions=("0.0.0-dev-${GITHUB_SHA::7}" "0.0.0-dev")
+              versions=("0.0.0-dev-${GITHUB_SHA::7}")
               ;;
             *)
               echo "::error::Unknown channel '${CHANNEL}'; expected release or development"
@@ -133,8 +140,13 @@ jobs:
             versions=("${chart_version}")
             app_versions=("${chart_app_version}")
           fi
+          floating_version=""
+          if [[ "${CHANNEL}" == "development" ]]; then
+            floating_version="0.0.0-dev"
+          fi
           printf 'versions=%s\n' "$(printf '%s,' "${versions[@]}" | sed 's/,$//')" >> "${GITHUB_OUTPUT}"
           printf 'app-versions=%s\n' "$(printf '%s,' "${app_versions[@]}" | sed 's/,$//')" >> "${GITHUB_OUTPUT}"
+          printf 'floating-version=%s\n' "${floating_version}" >> "${GITHUB_OUTPUT}"
 
       - name: Build locked chart dependencies
         env:
@@ -180,21 +192,29 @@ jobs:
           helm lint "${CHART_PATH}" "${values_args[@]}"
           helm template "${{ inputs.chart-name }}" "${CHART_PATH}" "${values_args[@]}" >/dev/null
 
-      - name: Log in to GHCR with Helm
+      - name: Log in to GHCR
         env:
+          CHANNEL: ${{ inputs.channel }}
           GHCR_USERNAME: ${{ github.actor }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: printf '%s' "${GHCR_TOKEN}" | helm registry login ghcr.io --username "${GHCR_USERNAME}" --password-stdin
+        run: |
+          set -euo pipefail
+          printf '%s' "${GHCR_TOKEN}" | helm registry login ghcr.io --username "${GHCR_USERNAME}" --password-stdin
+          if [[ "${CHANNEL}" == "development" ]]; then
+            printf '%s' "${GHCR_TOKEN}" | oras login ghcr.io --username "${GHCR_USERNAME}" --password-stdin
+          fi
 
       - name: Install YAML parser for rendered-image verification
         run: python3 -m pip install --disable-pip-version-check --quiet PyYAML==6.0.2
 
       - name: Package, publish, and pull-verify charts
         env:
+          CHANNEL: ${{ inputs.channel }}
           CHART_PATH: ${{ inputs.chart-path }}
           CHART_NAME: ${{ inputs.chart-name }}
           VERSIONS: ${{ steps.versions.outputs.versions }}
           APP_VERSIONS: ${{ steps.versions.outputs.app-versions }}
+          FLOATING_VERSION: ${{ steps.versions.outputs.floating-version }}
           VERSION_MODE: ${{ inputs.version-mode }}
           VALUES_FILES: ${{ inputs.values-files }}
           SET_VALUES: ${{ inputs.set-values }}
@@ -307,3 +327,35 @@ jobs:
             printf 'Published and byte-verified %s/%s:%s\n' \
               "${repository}" "${CHART_NAME}" "${version}" >> "${GITHUB_STEP_SUMMARY}"
           done
+
+          if [[ "${CHANNEL}" == "development" ]]; then
+            test "${#versions[@]}" -eq 1
+            immutable_version="${versions[0]}"
+            immutable_package="${package_dir}/${CHART_NAME}-${immutable_version}.tgz"
+            oci_repository="ghcr.io/${owner}/charts/${CHART_NAME}"
+            immutable_ref="${oci_repository}:${immutable_version}"
+            floating_ref="${oci_repository}:${FLOATING_VERSION}"
+
+            # Alias the exact OCI manifest. Do not package a second Chart.yaml:
+            # the floating chart retains the immutable appVersion and therefore
+            # selects the matching immutable product images.
+            oras tag "${immutable_ref}" "${FLOATING_VERSION}"
+            immutable_digest="$(oras resolve "${immutable_ref}")"
+            floating_digest="$(oras resolve "${floating_ref}")"
+            test "${floating_digest}" = "${immutable_digest}"
+
+            floating_verify_dir="${RUNNER_TEMP}/chart-pull-floating"
+            mkdir -p "${floating_verify_dir}"
+            helm pull "${repository}/${CHART_NAME}" \
+              --version "${FLOATING_VERSION}" \
+              --destination "${floating_verify_dir}"
+            floating_packages=("${floating_verify_dir}/${CHART_NAME}"-*.tgz)
+            test "${#floating_packages[@]}" -eq 1
+            test -s "${floating_packages[0]}"
+            cmp "${immutable_package}" "${floating_packages[0]}"
+            floating_metadata="$(helm show chart "${floating_packages[0]}")"
+            test "$(awk '/^version:/ {print $2; exit}' <<< "${floating_metadata}")" = "${immutable_version}"
+            test "$(awk '/^appVersion:/ {print $2; exit}' <<< "${floating_metadata}" | tr -d '\"')" = "${app_versions[0]}"
+            printf 'Floating alias %s:%s -> %s (byte-identical chart)\n' \
+              "${oci_repository}" "${FLOATING_VERSION}" "${floating_digest}" >> "${GITHUB_STEP_SUMMARY}"
+          fi
