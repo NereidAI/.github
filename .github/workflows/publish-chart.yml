@@ -4,10 +4,21 @@
 # Publish one product-owned Helm chart to GHCR OCI. The product repository
 # remains the chart's only source of truth; this workflow derives every version
 # from the caller's protected tag or main-branch commit and never mutates the
-# tracked Chart.yaml. Development publications package one immutable
-# commit-qualified chart whose appVersion selects the matching commit-qualified
-# product images. The rolling 0.0.0-dev OCI tag is then attached to that exact
-# manifest, never to a separately packaged chart.
+# tracked Chart.yaml.
+#
+# Development publications keep the rolling 0.0.0-dev identity: the chart is
+# packaged with version/appVersion 0.0.0-dev and the single floating OCI tag
+# moves to the new manifest. First publication uses helm push; a rerun whose
+# normalized archive is byte-identical is a verified no-op; changed content
+# replaces the tag through oras push --force with an explicit Helm config
+# layer, with pullback byte verification and automatic restoration of the
+# previous digest on any failure. The rendered chart must reference only
+# floating 0.0.0-dev first-party images. Per-commit image tags stay immutable
+# inside the image packages; the chart never selects them in development.
+#
+# Release publications (a protected v* tag) keep the immutable bare-SemVer
+# contract: helm push fails on an existing tag, so a release tag can never
+# silently move.
 name: Reusable Suite Chart Publication
 
 on:
@@ -65,7 +76,7 @@ jobs:
         with:
           version: v3.18.3
 
-      - name: Set up ORAS for exact OCI tag aliasing
+      - name: Set up ORAS for floating tag replacement
         if: inputs.channel == 'development'
         uses: oras-project/setup-oras@v2
         with:
@@ -116,14 +127,16 @@ jobs:
               ;;
             development)
               if [[ "${VERSION_MODE}" != "product" ]]; then
-                echo "::error::Development publication requires version-mode=product so chart and image tags share the commit"
+                echo "::error::Development publication requires version-mode=product so chart and image tags share the floating identity"
                 exit 1
               fi
               if [[ "${GITHUB_REF_TYPE}" != "branch" || "${GITHUB_REF_NAME}" != "${DEFAULT_BRANCH}" ]]; then
                 echo "::error::Development chart publication requires the repository default branch"
                 exit 1
               fi
-              versions=("0.0.0-dev-${GITHUB_SHA::7}")
+              # Dev charts keep the rolling 0.0.0-dev identity; only a v* tag
+              # run produces an immutable bare-SemVer chart.
+              versions=("0.0.0-dev")
               ;;
             *)
               echo "::error::Unknown channel '${CHANNEL}'; expected release or development"
@@ -140,13 +153,8 @@ jobs:
             versions=("${chart_version}")
             app_versions=("${chart_app_version}")
           fi
-          floating_version=""
-          if [[ "${CHANNEL}" == "development" ]]; then
-            floating_version="0.0.0-dev"
-          fi
           printf 'versions=%s\n' "$(printf '%s,' "${versions[@]}" | sed 's/,$//')" >> "${GITHUB_OUTPUT}"
           printf 'app-versions=%s\n' "$(printf '%s,' "${app_versions[@]}" | sed 's/,$//')" >> "${GITHUB_OUTPUT}"
-          printf 'floating-version=%s\n' "${floating_version}" >> "${GITHUB_OUTPUT}"
 
       - name: Build locked chart dependencies
         env:
@@ -214,17 +222,20 @@ jobs:
           CHART_NAME: ${{ inputs.chart-name }}
           VERSIONS: ${{ steps.versions.outputs.versions }}
           APP_VERSIONS: ${{ steps.versions.outputs.app-versions }}
-          FLOATING_VERSION: ${{ steps.versions.outputs.floating-version }}
           VERSION_MODE: ${{ inputs.version-mode }}
           VALUES_FILES: ${{ inputs.values-files }}
           SET_VALUES: ${{ inputs.set-values }}
+          # Bounds are overridable so offline/local tests run without sleeping.
+          READBACK_ATTEMPTS: ${{ vars.OCI_READBACK_ATTEMPTS || '6' }}
+          READBACK_DELAY_SECONDS: ${{ vars.OCI_READBACK_DELAY_SECONDS || '5' }}
         run: |
           set -euo pipefail
           owner="${GITHUB_REPOSITORY_OWNER,,}"
-          repository="oci://ghcr.io/${owner}/charts"
+          oci_registry="oci://ghcr.io/${owner}/charts"
+          oci_repository="ghcr.io/${owner}/charts/${CHART_NAME}"
           package_dir="${RUNNER_TEMP}/charts"
-          verify_dir="${RUNNER_TEMP}/chart-pull"
-          mkdir -p "${package_dir}" "${verify_dir}"
+          pull_dir="${RUNNER_TEMP}/chart-pull"
+          mkdir -p "${package_dir}" "${pull_dir}"
           values_args=()
           while IFS= read -r values_file; do
             [[ -z "${values_file}" ]] || values_args+=(--values "${values_file}")
@@ -232,6 +243,217 @@ jobs:
           while IFS= read -r assignment; do
             [[ -z "${assignment}" ]] || values_args+=(--set "${assignment}")
           done <<< "${SET_VALUES}"
+
+          # Repack the helm archive with fixed mtimes, ordering, and ownership
+          # so the same chart content is byte-identical across separate
+          # checkouts/runs. helm package embeds the working tree's file mtimes,
+          # which would otherwise make an unchanged chart compare different and
+          # defeat the floating-tag no-op path. Mirrors the NereidForge
+          # 03_package-charts.sh normalization.
+          normalize_chart_package() {
+            local archive="$1" name="$2" tree
+            tree="$(mktemp -d)"
+            tar -xzf "${archive}" -C "${tree}"
+            test -f "${tree}/${name}/Chart.yaml"
+            rm -f "${archive}"
+            tar --sort=name --mtime="@0" --owner=0 --group=0 \
+              --numeric-owner -czf "${archive}" -C "${tree}" "${name}"
+            rm -rf "${tree}"
+          }
+
+          # Only an explicit registry not-found response means a tag is absent;
+          # authentication, network, and other registry failures must stop the
+          # run instead of being mistaken for a missing tag.
+          oras_is_not_found_error() {
+            local message="${1,,}"
+            [[ -n "${message}" ]] || return 1
+            if [[ "${message}" == *"command not found"* ||
+                  "${message}" == *"no such file or directory"* ||
+                  "${message}" == *"unauthorized"* ||
+                  "${message}" == *"forbidden"* ||
+                  "${message}" == *"authentication"* ||
+                  "${message}" == *"authoriz"* ||
+                  "${message}" == *"denied"* ||
+                  "${message}" == *"permission"* ||
+                  "${message}" == *"credential"* ||
+                  "${message}" == *"connection"* ||
+                  "${message}" == *"network"* ||
+                  "${message}" == *"timeout"* ||
+                  "${message}" == *"no such host"* ||
+                  "${message}" == *"dial "* ||
+                  "${message}" == *"refused"* ||
+                  "${message}" == *"x509"* ||
+                  "${message}" == *"certificate"* ||
+                  "${message}" == *"tls"* ]]; then
+              return 1
+            fi
+            [[ "${message}" == *"not found"* ||
+               "${message}" == *"manifest unknown"* ||
+               "${message}" == *"name unknown"* ]]
+          }
+
+          # Sets RESOLVE_DIGEST on success. Returns 10 for absence and 1 for
+          # every other resolution failure.
+          oras_resolve() {
+            local reference="$1" error_file output
+            error_file="$(mktemp)"
+            if output="$(oras resolve "${reference}" 2>"${error_file}")"; then
+              rm -f "${error_file}"
+              RESOLVE_DIGEST="${output}"
+              if [[ -z "${RESOLVE_DIGEST}" || "${RESOLVE_DIGEST}" == *$'\n'* ]]; then
+                echo "Invalid empty or multiline digest while resolving ${reference}" >&2
+                return 1
+              fi
+              return 0
+            fi
+            if oras_is_not_found_error "$(cat "${error_file}")"; then
+              rm -f "${error_file}"
+              return 10
+            fi
+            cat "${error_file}" >&2
+            rm -f "${error_file}"
+            return 1
+          }
+
+          # Read-after-write on a brand-new GHCR package can briefly answer
+          # not-found while the registry propagates its first artifact. Retry
+          # only the absence result with bounded backoff; every other error
+          # fails closed immediately.
+          wait_for_artifact() {
+            local reference="$1" attempt=1 status
+            while (( attempt <= READBACK_ATTEMPTS )); do
+              if oras_resolve "${reference}"; then
+                return 0
+              fi
+              status=$?
+              if [[ "${status}" -ne 10 ]]; then
+                return 1
+              fi
+              if (( attempt == READBACK_ATTEMPTS )); then
+                echo "Timed out waiting for ${reference} to become visible" >&2
+                return 1
+              fi
+              sleep "${READBACK_DELAY_SECONDS}"
+              ((attempt++))
+            done
+          }
+
+          restore_floating_tag() {
+            local previous_digest="$1"
+            [[ -n "${previous_digest}" ]] || return 0
+            echo "Restoring ${oci_repository}:0.0.0-dev to previous digest ${previous_digest}" >&2
+            if ! oras tag "${oci_repository}@${previous_digest}" 0.0.0-dev; then
+              echo "Operator recovery is required for floating tag ${oci_repository}:0.0.0-dev" >&2
+              return 1
+            fi
+            if ! oras_resolve "${oci_repository}:0.0.0-dev"; then
+              echo "Operator recovery is required for floating tag ${oci_repository}:0.0.0-dev" >&2
+              return 1
+            fi
+            if [[ "${RESOLVE_DIGEST}" != "${previous_digest}" ]]; then
+              echo "Restored floating tag resolved to ${RESOLVE_DIGEST}, expected ${previous_digest}" >&2
+              return 1
+            fi
+          }
+
+          # Publish the rolling development chart. The floating tag is allowed
+          # to move to new content: same bytes are a verified no-op, changed
+          # bytes replace the tag via ORAS because helm push cannot overwrite
+          # an existing OCI tag. Every path ends with a pullback byte
+          # comparison; a failed replacement restores the previous digest.
+          publish_floating_chart() {
+            local package="$1" pull_backup previous_digest="" present=0 status
+            local package_dir package_base config_base
+            if oras_resolve "${oci_repository}:0.0.0-dev"; then
+              present=1
+              previous_digest="${RESOLVE_DIGEST}"
+            else
+              status=$?
+              if [[ "${status}" -ne 10 ]]; then
+                return 1
+              fi
+            fi
+
+            if (( present )); then
+              pull_backup="$(mktemp -d)"
+              if ! helm pull "${oci_registry}/${CHART_NAME}" \
+                  --version 0.0.0-dev --destination "${pull_backup}"; then
+                rm -rf "${pull_backup}"
+                return 1
+              fi
+              local pulled="${pull_backup}/${CHART_NAME}-0.0.0-dev.tgz"
+              if cmp -s "${package}" "${pulled}"; then
+                # Same-content rerun: the normalized archive is byte-identical,
+                # so the floating tag must not be touched.
+                rm -rf "${pull_backup}"
+                if ! oras_resolve "${oci_repository}:0.0.0-dev"; then
+                  return 1
+                fi
+                if [[ "${RESOLVE_DIGEST}" != "${previous_digest}" ]]; then
+                  echo "Floating chart moved during no-op verification: ${oci_repository}:0.0.0-dev" >&2
+                  return 1
+                fi
+                echo "Floating chart already up to date (byte-identical no-op): ${oci_repository}:0.0.0-dev"
+                return 0
+              fi
+              rm -rf "${pull_backup}"
+
+              # Replicate the manifest shape helm push writes: an empty Helm
+              # config layer plus the chart tar/gzip layer. ORAS only accepts
+              # relative file references, so push from the package directory.
+              package_dir="$(dirname "${package}")"
+              package_base="$(basename "${package}")"
+              config_base=".oras-helm-config.json"
+              printf '{}\n' > "${package_dir}/${config_base}"
+              if ! (
+                cd "${package_dir}"
+                oras push --force \
+                  --config "${config_base}:application/vnd.cncf.helm.config.v1+json" \
+                  "${oci_repository}:0.0.0-dev" \
+                  "${package_base}:application/vnd.cncf.helm.chart.content.v1.tar+gzip"
+              ); then
+                rm -f "${package_dir}/${config_base}"
+                echo "ORAS force push failed for floating chart ${oci_repository}:0.0.0-dev" >&2
+                restore_floating_tag "${previous_digest}"
+                return 1
+              fi
+              rm -f "${package_dir}/${config_base}"
+            else
+              if ! helm push "${package}" "${oci_registry}"; then
+                echo "Helm push failed for floating chart ${oci_repository}:0.0.0-dev" >&2
+                return 1
+              fi
+              if ! wait_for_artifact "${oci_repository}:0.0.0-dev"; then
+                return 1
+              fi
+            fi
+
+            local verify_dir pulled_packages
+            verify_dir="$(mktemp -d)"
+            local restore_needed=0
+            if ! helm pull "${oci_registry}/${CHART_NAME}" \
+                --version 0.0.0-dev --destination "${verify_dir}"; then
+              restore_needed=1
+            else
+              pulled_packages=("${verify_dir}/${CHART_NAME}"-0.0.0-dev.tgz)
+              if [[ "${#pulled_packages[@]}" -ne 1 || ! -s "${pulled_packages[0]}" ]]; then
+                echo "Floating chart pullback did not return exactly one package" >&2
+                restore_needed=1
+              elif ! cmp -s "${package}" "${pulled_packages[0]}"; then
+                echo "Floating chart content differs after publication: ${oci_repository}:0.0.0-dev" >&2
+                restore_needed=1
+              fi
+            fi
+            rm -rf "${verify_dir}"
+            if (( restore_needed )); then
+              restore_floating_tag "${previous_digest}"
+              return 1
+            fi
+            if ! oras_resolve "${oci_repository}:0.0.0-dev"; then
+              restore_floating_tag "${previous_digest}"
+              return 1
+            fi
+          }
 
           IFS=',' read -ra versions <<< "${VERSIONS}"
           IFS=',' read -ra app_versions <<< "${APP_VERSIONS}"
@@ -246,6 +468,7 @@ jobs:
             helm package "${package_args[@]}"
             package="${package_dir}/${CHART_NAME}-${version}.tgz"
             test -f "${package}"
+            normalize_chart_package "${package}" "${CHART_NAME}"
             metadata="$(helm show chart "${package}")"
             actual_version="$(awk '/^version:/ {print $2; exit}' <<< "${metadata}")"
             actual_app_version="$(awk '/^appVersion:/ {print $2; exit}' <<< "${metadata}" | tr -d '\"')"
@@ -319,43 +542,19 @@ jobs:
                   "suite images do not match chart appVersion " + app_version + ": " + ", ".join(mismatches)
               )
           PY
-            helm push "${package}" "${repository}"
-            helm pull "${repository}/${CHART_NAME}" \
-              --version "${version}" \
-              --destination "${verify_dir}"
-            cmp "${package}" "${verify_dir}/${CHART_NAME}-${version}.tgz"
-            printf 'Published and byte-verified %s/%s:%s\n' \
-              "${repository}" "${CHART_NAME}" "${version}" >> "${GITHUB_STEP_SUMMARY}"
+
+            if [[ "${CHANNEL}" == "development" ]]; then
+              test "${version}" = "0.0.0-dev"
+              publish_floating_chart "${package}"
+              printf 'Published and pull-verified floating chart %s:0.0.0-dev\n' \
+                "${oci_repository}" >> "${GITHUB_STEP_SUMMARY}"
+            else
+              helm push "${package}" "${oci_registry}"
+              helm pull "${oci_registry}/${CHART_NAME}" \
+                --version "${version}" \
+                --destination "${pull_dir}"
+              cmp "${package}" "${pull_dir}/${CHART_NAME}-${version}.tgz"
+              printf 'Published and byte-verified %s/%s:%s\n' \
+                "${oci_registry}" "${CHART_NAME}" "${version}" >> "${GITHUB_STEP_SUMMARY}"
+            fi
           done
-
-          if [[ "${CHANNEL}" == "development" ]]; then
-            test "${#versions[@]}" -eq 1
-            immutable_version="${versions[0]}"
-            immutable_package="${package_dir}/${CHART_NAME}-${immutable_version}.tgz"
-            oci_repository="ghcr.io/${owner}/charts/${CHART_NAME}"
-            immutable_ref="${oci_repository}:${immutable_version}"
-            floating_ref="${oci_repository}:${FLOATING_VERSION}"
-
-            # Alias the exact OCI manifest. Do not package a second Chart.yaml:
-            # the floating chart retains the immutable appVersion and therefore
-            # selects the matching immutable product images.
-            oras tag "${immutable_ref}" "${FLOATING_VERSION}"
-            immutable_digest="$(oras resolve "${immutable_ref}")"
-            floating_digest="$(oras resolve "${floating_ref}")"
-            test "${floating_digest}" = "${immutable_digest}"
-
-            floating_verify_dir="${RUNNER_TEMP}/chart-pull-floating"
-            mkdir -p "${floating_verify_dir}"
-            helm pull "${repository}/${CHART_NAME}" \
-              --version "${FLOATING_VERSION}" \
-              --destination "${floating_verify_dir}"
-            floating_packages=("${floating_verify_dir}/${CHART_NAME}"-*.tgz)
-            test "${#floating_packages[@]}" -eq 1
-            test -s "${floating_packages[0]}"
-            cmp "${immutable_package}" "${floating_packages[0]}"
-            floating_metadata="$(helm show chart "${floating_packages[0]}")"
-            test "$(awk '/^version:/ {print $2; exit}' <<< "${floating_metadata}")" = "${immutable_version}"
-            test "$(awk '/^appVersion:/ {print $2; exit}' <<< "${floating_metadata}" | tr -d '\"')" = "${app_versions[0]}"
-            printf 'Floating alias %s:%s -> %s (byte-identical chart)\n' \
-              "${oci_repository}" "${FLOATING_VERSION}" "${floating_digest}" >> "${GITHUB_STEP_SUMMARY}"
-          fi
