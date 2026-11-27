@@ -41,20 +41,37 @@ The `channel` and `version-mode` inputs select the version model:
   from the wrapper's `Chart.yaml`. This is for versioned third-party wrappers
   whose application version is independent of the suite release.
 - `development`: the caller must be running for the repository's default branch
-  and use `version-mode: product`. The workflow publishes
-  `0.0.0-dev-<short-sha>` first and the rolling `0.0.0-dev` second. Each
-  package's `appVersion` equals its chart version, so charts that default
-  suite-owned image tags to `.Chart.AppVersion` select the matching
-  commit-qualified images for immutable development installations.
+  and use `version-mode: product`. The workflow packages one chart with the
+  rolling `0.0.0-dev` identity for both `version` and `appVersion` and moves
+  the single floating `0.0.0-dev` OCI tag to that manifest. No per-commit
+  chart tag is created; only a protected `v*` release produces an immutable
+  bare-SemVer chart. The rendered chart must reference only floating
+  `0.0.0-dev` suite-owned images, so charts that default image tags to
+  `.Chart.AppVersion` stay on the rolling image alias. Per-commit image tags
+  remain inside the image packages as traceability artifacts; a development
+  chart never selects them.
 
 Product chart sources keep the `0.0.0-dev` placeholder; callers never pass a
 release version and no `VERSION` file is introduced. Upstream wrappers instead
 keep their own pinned chart/application versions. Authentication uses
 `helm registry login` (Docker's credential file is not Helm's registry
-configuration). Every push is followed by an authenticated `helm pull` and a
-byte-for-byte comparison with the pushed archive. After the first publication, set the
-new GHCR package's visibility to Public and verify an anonymous pull before
-referencing it from public installation documentation.
+configuration).
+
+Because the floating tag is allowed to move while `helm push` cannot overwrite
+an existing OCI tag, development publication has three verified paths. The
+packaged archive is first normalized (fixed tar order, mtime, owner) so the
+same chart content is byte-identical across separate checkouts and runs. A
+first publication uses `helm push` and waits for registry propagation; a rerun
+whose normalized archive is byte-identical to the pulled tag is a verified
+no-op that leaves the tag untouched; changed content replaces the tag through
+`oras push --force` with an explicit Helm config layer, because an
+`--artifact-type` manifest is rejected by `helm pull`. Every path ends with an
+authenticated `helm pull` and a byte-for-byte comparison, and a failed
+replacement restores the previously recorded tag digest before the run fails
+closed. Release publication keeps the immutable contract: the bare-SemVer
+`helm push` fails on an existing tag instead of moving it. After the first
+publication, set the new GHCR package's visibility to Public and verify an
+anonymous pull before referencing it from public installation documentation.
 
 ### Inputs
 
